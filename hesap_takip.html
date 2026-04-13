@@ -6,55 +6,59 @@
   <meta name="theme-color" content="#0b0b0f">
   <title>Hesap Takip</title>
   <style>
-    :root{
-      --bg:#0b0b0f; --card:#16181d; --line:#2a2d34; --text:#f5f7fb; --muted:#a7afbd;
-      --green:#19c37d; --red:#ef4444; --blue:#4f8cff; --yellow:#eab308;
-    }
+    :root{--bg:#0b0b0f;--card:#16181d;--line:#2a2d34;--text:#f5f7fb;--muted:#a7afbd;--green:#19c37d;--red:#ef4444;--blue:#4f8cff;--yellow:#eab308;--orange:#fb923c;}
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
-    .wrap{max-width:900px;margin:0 auto;padding:16px 16px 90px}
+    .wrap{max-width:960px;margin:0 auto;padding:16px 16px 96px}
     .top{display:flex;justify-content:space-between;align-items:center;margin:8px 0 16px}
-    h1{font-size:30px;margin:0}
-    .muted{color:var(--muted);font-size:14px}
+    h1{font-size:30px;margin:0}.muted{color:var(--muted);font-size:14px}
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
-    .label{color:var(--muted);font-size:13px;margin-bottom:8px}
-    .value{font-size:27px;font-weight:800}
-    .green{color:var(--green)} .red{color:var(--red)} .blue{color:var(--blue)} .yellow{color:var(--yellow)}
+    .label{color:var(--muted);font-size:13px;margin-bottom:8px}.value{font-size:25px;font-weight:800}
+    .green{color:var(--green)} .red{color:var(--red)} .blue{color:var(--blue)} .yellow{color:var(--yellow)} .orange{color:var(--orange)}
     .actions{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0}
-    button,.btn{border:none;background:#1e222a;color:var(--text);padding:14px 16px;border-radius:16px;font-size:16px;font-weight:700}
-    .primary{background:#232a35}
+    button{border:none;background:#1e222a;color:var(--text);padding:14px 16px;border-radius:16px;font-size:15px;font-weight:700}
+    .primary{background:#232a35}.danger{background:#39181b}.ok{background:#133023}.warn{background:#3a2e14}
     .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px}
     .tab{padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:#111318;color:var(--text)}
     .tab.active{background:#1d2330}
-    .section{display:none}
-    .section.active{display:block}
+    .section{display:none}.section.active{display:block}
     .list{display:flex;flex-direction:column;gap:10px}
     .item{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px}
     .row{display:flex;justify-content:space-between;gap:12px;align-items:center}
-    .title{font-weight:700}
-    .sub{font-size:13px;color:var(--muted);margin-top:4px}
-    input,select,textarea{width:100%;background:#111318;color:var(--text);border:1px solid var(--line);border-radius:14px;padding:12px 13px;font-size:16px}
-    textarea{min-height:90px;resize:vertical}
-    .form{display:grid;gap:12px}
-    .inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .bottom{position:fixed;left:0;right:0;bottom:0;background:rgba(11,11,15,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px}
-    .bottom button{padding:10px 8px;font-size:13px;border-radius:12px}
-    .small{font-size:12px}
-    .danger{background:#39181b}
-    .ok{background:#133023}
-    .right{display:flex;gap:8px;flex-wrap:wrap}
-    .empty{padding:24px;text-align:center;color:var(--muted)}
-    .hint{font-size:12px;color:var(--muted);margin-top:6px}
-    @media (max-width:560px){ .grid,.actions,.inline{grid-template-columns:1fr 1fr} .value{font-size:22px} h1{font-size:26px}}
+    .title{font-weight:700}.sub{font-size:13px;color:var(--muted);margin-top:4px}
+    input,select{width:100%;background:#111318;color:var(--text);border:1px solid var(--line);border-radius:14px;padding:12px 13px;font-size:16px}
+    .form{display:grid;gap:12px}.inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}.triple{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .bottom{position:fixed;left:0;right:0;bottom:0;background:rgba(11,11,15,.94);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px}
+    .bottom button{padding:10px 8px;font-size:12px;border-radius:12px}
+    .small{font-size:12px}.right{display:flex;gap:8px;flex-wrap:wrap}
+    .empty{padding:24px;text-align:center;color:var(--muted)}.hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:20px;z-index:9999}
+    .modal{width:min(420px,100%);background:#111318;border:1px solid var(--line);border-radius:22px;padding:20px}.hidden{display:none!important}
+    @media (max-width:760px){.triple{grid-template-columns:1fr}}
+    @media (max-width:560px){.grid,.actions,.inline{grid-template-columns:1fr 1fr}.value{font-size:22px}h1{font-size:26px}}
   </style>
 </head>
 <body>
+<div id="pinOverlay" class="overlay hidden">
+  <div class="modal">
+    <div class="title" style="font-size:22px;margin-bottom:8px">Hesap Takip</div>
+    <div class="muted" id="pinText">Uygulamayı açmak için şifre gir.</div>
+    <div class="form" style="margin-top:14px">
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="Şifre">
+      <div class="inline">
+        <button class="ok" onclick="submitPin()">Devam</button>
+        <button class="warn" onclick="skipPin()">Şimdilik Kapat</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="top">
     <div>
       <h1>Hesap Takip</h1>
-      <div class="muted">Gelir, gider, borç ve alacak yönetimi</div>
+      <div class="muted">Gelir, gider, kredi kartı, borç ve alacak yönetimi</div>
     </div>
     <div class="muted" id="today"></div>
   </div>
@@ -68,14 +72,23 @@
       <div class="card"><div class="label">Toplam Alacak</div><div class="value green" id="receivableTotal">0 ₺</div></div>
       <div class="card"><div class="label">Toplam Borç</div><div class="value red" id="debtTotal">0 ₺</div></div>
     </div>
+
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="label">Kredi Kartı Toplam Limit</div><div class="value blue" id="cardLimitTotal">0 ₺</div></div>
+      <div class="card"><div class="label">Kredi Kartı Toplam Borç</div><div class="value orange" id="cardDebtTotal">0 ₺</div></div>
+      <div class="card"><div class="label">Kullanılabilir Limit</div><div class="value green" id="cardAvailTotal">0 ₺</div></div>
+      <div class="card"><div class="label">İş İçin Verilip Geri Alınacak</div><div class="value yellow" id="businessAdvanceTotal">0 ₺</div></div>
+    </div>
+
     <div class="actions">
       <button class="primary" onclick="go('add');setType('gelir')">Gelir Ekle</button>
       <button class="primary" onclick="go('add');setType('gider')">Gider Ekle</button>
       <button class="primary" onclick="go('people');openPersonForm('alacak')">Alacak Ekle</button>
       <button class="primary" onclick="go('people');openPersonForm('borc')">Borç Ekle</button>
     </div>
+
     <div class="card">
-      <div class="row"><div class="title">Son Kayıtlar</div><div class="small muted">En son 8 hareket</div></div>
+      <div class="row"><div class="title">Son Kayıtlar</div><div class="small muted">En son 10 hareket</div></div>
       <div id="recentList" class="list" style="margin-top:10px"></div>
     </div>
   </div>
@@ -89,7 +102,7 @@
       <div class="form">
         <input id="tutar" type="number" step="0.01" placeholder="Tutar">
         <input id="aciklama" placeholder="Açıklama">
-        <input id="kategori" placeholder="Kategori">
+        <select id="kategori"></select>
         <div class="inline">
           <input id="tarih" type="date">
           <select id="odeme">
@@ -100,6 +113,23 @@
         </div>
         <button class="ok" onclick="saveTransaction()">Kaydet</button>
       </div>
+      <div class="hint">Şahsi ve ev kategorileri normal giderdir. Şelale Gıda, Foto Şelale, Katlama Atölye ve Anneme harcamaları geri alınacak borç gibi tutulur.</div>
+    </div>
+  </div>
+
+  <div id="cards" class="section">
+    <div class="card">
+      <div class="row"><div class="title">Kredi Kartları</div><button onclick="toggleCardForm()">+ Kart Ekle</button></div>
+      <div id="cardForm" class="form hidden" style="margin-top:12px">
+        <input id="cardName" placeholder="Kart adı / banka">
+        <div class="triple">
+          <input id="cardLimit" type="number" step="0.01" placeholder="Limit">
+          <input id="cardDebt" type="number" step="0.01" placeholder="Borç">
+          <input id="cardDue" type="date">
+        </div>
+        <button class="ok" onclick="saveCard()">Kaydet</button>
+      </div>
+      <div id="cardList" class="list" style="margin-top:12px"></div>
     </div>
   </div>
 
@@ -110,7 +140,7 @@
         <button onclick="openPersonForm('borc')">+ Borç</button>
       </div></div>
       <div id="personForm" style="display:none;margin-top:12px" class="form">
-        <input id="kisiAdi" placeholder="Kişi adı">
+        <input id="kisiAdi" placeholder="Kişi / hesap adı">
         <select id="kisiTur">
           <option value="alacak">Alacak (bana borçlu)</option>
           <option value="borc">Borç (ben borçluyum)</option>
@@ -129,6 +159,12 @@
   <div id="records" class="section">
     <div class="card">
       <div class="row"><div class="title">Tüm Kayıtlar</div><button onclick="exportData()">Yedek Dışa Aktar</button></div>
+      <div class="tabs">
+        <button class="tab active" id="flt-all" onclick="setFilter('all')">Tümü</button>
+        <button class="tab" id="flt-gelir" onclick="setFilter('gelir')">Gelir</button>
+        <button class="tab" id="flt-gider" onclick="setFilter('gider')">Gider</button>
+        <button class="tab" id="flt-advance" onclick="setFilter('advance')">İş Harcaması</button>
+      </div>
       <div id="recordList" class="list" style="margin-top:12px"></div>
     </div>
     <div class="card" style="margin-top:12px">
@@ -138,14 +174,24 @@
     </div>
   </div>
 
-  <div id="report" class="section">
-    <div class="grid">
-      <div class="card"><div class="label">Bu Ay Gelir</div><div class="value green" id="monthIncome">0 ₺</div></div>
-      <div class="card"><div class="label">Bu Ay Gider</div><div class="value red" id="monthExpense">0 ₺</div></div>
+  <div id="settings" class="section">
+    <div class="card">
+      <div class="title">Şifre Ayarı</div>
+      <div class="hint">4-8 haneli bir şifre belirle.</div>
+      <div class="form" style="margin-top:12px">
+        <input id="newPin" type="password" inputmode="numeric" maxlength="8" placeholder="Yeni şifre">
+        <div class="inline">
+          <button class="ok" onclick="setPin()">Şifreyi Kaydet</button>
+          <button class="danger" onclick="clearPin()">Şifreyi Kaldır</button>
+        </div>
+      </div>
     </div>
     <div class="card" style="margin-top:12px">
-      <div class="title">Kategori Özeti</div>
-      <div id="categorySummary" class="list" style="margin-top:12px"></div>
+      <div class="title">Kategori Mantığı</div>
+      <div class="list" style="margin-top:12px">
+        <div class="item"><div class="title">Gider olarak düşenler</div><div class="sub">Şahsi Harcamam, Evime Harcamam</div></div>
+        <div class="item"><div class="title">Borç gibi takip edilenler</div><div class="sub">Şelale Gıda Harcamam, Foto Şelale Harcamam, Katlama Atölye Harcamam, Anneme Harcamam</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -153,223 +199,105 @@
 <div class="bottom">
   <button onclick="go('home')">Ana Sayfa</button>
   <button onclick="go('add')">Ekle</button>
-  <button onclick="go('people')">Borç/Alacak</button>
-  <button onclick="go('records')">Kayıtlar</button>
+  <button onclick="go('cards')">Kartlar</button>
+  <button onclick="go('people')">Borç</button>
+  <button onclick="go('settings')">Ayarlar</button>
 </div>
 
 <script>
-const KEY='hesap_takip_data_v1';
-let currentType='gelir';
-let state=load();
+const KEY='hesap_takip_data_v2';
+const DEFAULTS={transactions:[],people:[],cards:[],settings:{pin:''}};
+const expenseCategories=['Şahsi Harcamam','Evime Harcamam','Şelale Gıda Harcamam','Foto Şelale Harcamam','Katlama Atölye Harcamam','Anneme Harcamam'];
+const incomeCategories=['Genel Gelir','Tahsilat','Diğer Gelir'];
+const advanceCategories=['Şelale Gıda Harcamam','Foto Şelale Harcamam','Katlama Atölye Harcamam','Anneme Harcamam'];
+let state=load(), currentType='gelir', currentFilter='all';
 
-function todayStr(){
-  const d=new Date();
-  return d.toISOString().slice(0,10);
-}
-function fmtDate(s){
-  if(!s) return '';
-  const [y,m,d]=s.split('-');
-  return `${d}.${m}.${y}`;
-}
-function money(n){
-  n=Number(n||0);
-  return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2}).format(n);
-}
-function load(){
-  try{
-    return JSON.parse(localStorage.getItem(KEY)) || {transactions:[], people:[]};
-  }catch(e){ return {transactions:[], people:[]}; }
-}
-function save(){
-  localStorage.setItem(KEY, JSON.stringify(state));
-  render();
-}
-function go(id){
-  document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-function setType(t){
-  currentType=t;
-  document.getElementById('tab-gelir').classList.toggle('active', t==='gelir');
-  document.getElementById('tab-gider').classList.toggle('active', t==='gider');
-}
+function todayStr(){return new Date().toISOString().slice(0,10);}
+function fmtDate(s){if(!s)return ''; const p=s.split('-'); return p[2]+'.'+p[1]+'.'+p[0];}
+function money(n){n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2}).format(n);}
+function clone(o){return JSON.parse(JSON.stringify(o));}
+function load(){try{return Object.assign(clone(DEFAULTS), JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){return clone(DEFAULTS);}}
+function save(){localStorage.setItem(KEY, JSON.stringify(state)); render();}
+function go(id){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active')); document.getElementById(id).classList.add('active');}
+function setType(t){currentType=t; document.getElementById('tab-gelir').classList.toggle('active', t==='gelir'); document.getElementById('tab-gider').classList.toggle('active', t==='gider'); rebuildCategoryOptions();}
+function rebuildCategoryOptions(){const s=document.getElementById('kategori'); const list=currentType==='gelir'?incomeCategories:expenseCategories; s.innerHTML=list.map(x=>'<option>'+x+'</option>').join('');}
+function isAdvanceExpense(cat){return advanceCategories.indexOf(cat)>-1;}
 function saveTransaction(){
-  const amount=Number(document.getElementById('tutar').value||0);
-  if(!amount){ alert('Tutar gir.'); return; }
-  const item={
-    id:Date.now()+Math.random(),
-    kind:'transaction',
-    type:currentType,
-    amount,
-    description:document.getElementById('aciklama').value.trim(),
-    category:document.getElementById('kategori').value.trim()||'Diğer',
-    date:document.getElementById('tarih').value||todayStr(),
-    method:document.getElementById('odeme').value
-  };
+  const amount=Number(document.getElementById('tutar').value||0); if(!amount){alert('Tutar gir.'); return;}
+  const category=document.getElementById('kategori').value;
+  const item={id:Date.now()+Math.random(),type:currentType,amount:amount,description:document.getElementById('aciklama').value.trim(),category:category,date:document.getElementById('tarih').value||todayStr(),method:document.getElementById('odeme').value,isAdvance:currentType==='gider' && isAdvanceExpense(category)};
   state.transactions.unshift(item);
-  document.getElementById('tutar').value='';
-  document.getElementById('aciklama').value='';
-  document.getElementById('kategori').value='';
-  document.getElementById('tarih').value=todayStr();
-  save();
-  go('home');
+  if(item.isAdvance){
+    state.people.unshift({id:Date.now()+Math.random()+1,name:category.replace(' Harcamam',''),type:'alacak',amount:amount,date:item.date,note:'Gün içi verildi, geri alınacak',settlements:[]});
+  }
+  document.getElementById('tutar').value=''; document.getElementById('aciklama').value=''; document.getElementById('tarih').value=todayStr(); save(); go('home');
 }
-function openPersonForm(type){
-  document.getElementById('personForm').style.display='grid';
-  document.getElementById('kisiTur').value=type||'alacak';
+function toggleCardForm(){document.getElementById('cardForm').classList.toggle('hidden');}
+function saveCard(){
+  const name=document.getElementById('cardName').value.trim(), limit=Number(document.getElementById('cardLimit').value||0), debt=Number(document.getElementById('cardDebt').value||0);
+  if(!name || !limit){alert('Kart adı ve limit gir.'); return;}
+  state.cards.unshift({id:Date.now()+Math.random(),name:name,limit:limit,debt:debt,due:document.getElementById('cardDue').value||''});
+  document.getElementById('cardName').value=''; document.getElementById('cardLimit').value=''; document.getElementById('cardDebt').value=''; document.getElementById('cardDue').value=''; save();
 }
+function deleteCard(id){if(!confirm('Kartı silmek istiyor musun?')) return; state.cards=state.cards.filter(x=>x.id!==id); save();}
+function cardDebtPrompt(id){const c=state.cards.find(x=>x.id===id); if(!c) return; const raw=prompt('Yeni kart borcunu gir', c.debt||0); if(raw===null) return; c.debt=Number(raw||0); save();}
+function openPersonForm(type){document.getElementById('personForm').style.display='grid'; document.getElementById('kisiTur').value=type||'alacak';}
 function savePersonRecord(){
-  const name=document.getElementById('kisiAdi').value.trim();
-  const amount=Number(document.getElementById('kisiTutar').value||0);
-  if(!name || !amount){ alert('Kişi adı ve tutar gir.'); return; }
-  const rec={
-    id:Date.now()+Math.random(),
-    name,
-    type:document.getElementById('kisiTur').value,
-    amount,
-    date:document.getElementById('kisiTarih').value||todayStr(),
-    note:document.getElementById('kisiNot').value.trim(),
-    settlements:[]
-  };
-  state.people.unshift(rec);
-  document.getElementById('kisiAdi').value='';
-  document.getElementById('kisiTutar').value='';
-  document.getElementById('kisiTarih').value=todayStr();
-  document.getElementById('kisiNot').value='';
-  save();
+  const name=document.getElementById('kisiAdi').value.trim(), amount=Number(document.getElementById('kisiTutar').value||0);
+  if(!name || !amount){alert('Kişi adı ve tutar gir.'); return;}
+  state.people.unshift({id:Date.now()+Math.random(),name:name,type:document.getElementById('kisiTur').value,amount:amount,date:document.getElementById('kisiTarih').value||todayStr(),note:document.getElementById('kisiNot').value.trim(),settlements:[]});
+  document.getElementById('kisiAdi').value=''; document.getElementById('kisiTutar').value=''; document.getElementById('kisiTarih').value=todayStr(); document.getElementById('kisiNot').value=''; save();
 }
-function deleteTransaction(id){
-  if(!confirm('Bu kaydı silmek istiyor musun?')) return;
-  state.transactions=state.transactions.filter(x=>x.id!==id);
-  save();
-}
-function deletePerson(id){
-  if(!confirm('Bu kişi kaydını silmek istiyor musun?')) return;
-  state.people=state.people.filter(x=>x.id!==id);
-  save();
-}
-function settlementPrompt(id){
-  const person=state.people.find(x=>x.id===id);
-  if(!person) return;
-  const raw=prompt('Ödeme / tahsilat tutarı gir');
-  const amount=Number(raw||0);
-  if(!amount) return;
-  person.settlements.push({id:Date.now()+Math.random(), amount, date:todayStr()});
-  save();
-}
+function deleteTransaction(id){if(!confirm('Bu kaydı silmek istiyor musun?')) return; state.transactions=state.transactions.filter(x=>x.id!==id); save();}
+function deletePerson(id){if(!confirm('Bu kişi kaydını silmek istiyor musun?')) return; state.people=state.people.filter(x=>x.id!==id); save();}
+function settlementPrompt(id){const p=state.people.find(x=>x.id===id); if(!p) return; const raw=prompt('Ödeme / tahsilat tutarı gir'); const amount=Number(raw||0); if(!amount)return; p.settlements.push({id:Date.now()+Math.random(),amount:amount,date:todayStr()}); save();}
+function setFilter(f){currentFilter=f; ['all','gelir','gider','advance'].forEach(x=>document.getElementById('flt-'+x).classList.toggle('active',x===f)); renderRecords();}
 function calc(){
-  const today=todayStr();
-  let todayIncome=0,todayExpense=0,cash=0,monthIncome=0,monthExpense=0;
-  const ym=today.slice(0,7);
-  for(const t of state.transactions){
-    if(t.type==='gelir'){ cash+=Number(t.amount); if(t.date===today) todayIncome+=Number(t.amount); if((t.date||'').slice(0,7)===ym) monthIncome+=Number(t.amount); }
-    else { cash-=Number(t.amount); if(t.date===today) todayExpense+=Number(t.amount); if((t.date||'').slice(0,7)===ym) monthExpense+=Number(t.amount); }
-  }
+  const today=todayStr(), ym=today.slice(0,7); let todayIncome=0,todayExpense=0,cash=0,monthIncome=0,monthExpense=0,businessAdvance=0;
+  for(const t of state.transactions){const a=Number(t.amount||0); if(t.type==='gelir'){cash+=a; if(t.date===today)todayIncome+=a; if((t.date||'').slice(0,7)===ym)monthIncome+=a;} else {cash-=a; if(t.date===today)todayExpense+=a; if((t.date||'').slice(0,7)===ym)monthExpense+=a; if(t.isAdvance)businessAdvance+=a;}}
   let receivable=0,debt=0;
-  const cats={};
-  for(const t of state.transactions){
-    const key=`${t.type}: ${t.category||'Diğer'}`;
-    cats[key]=(cats[key]||0)+Number(t.amount||0);
-  }
-  for(const p of state.people){
-    const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0);
-    const remain=Math.max(0, Number(p.amount||0)-settled);
-    if(p.type==='alacak') receivable+=remain; else debt+=remain;
-  }
-  return {todayIncome,todayExpense,cash,receivable,debt,monthIncome,monthExpense,cats};
+  for(const p of state.people){const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0); const remain=Math.max(0,Number(p.amount||0)-settled); if(p.type==='alacak')receivable+=remain; else debt+=remain;}
+  let cardLimitTotal=0, cardDebtTotal=0;
+  for(const c of state.cards){cardLimitTotal+=Number(c.limit||0); cardDebtTotal+=Number(c.debt||0);}
+  return {todayIncome,todayExpense,cash,receivable,debt,monthIncome,monthExpense,businessAdvance,cardLimitTotal,cardDebtTotal,cardAvailTotal:cardLimitTotal-cardDebtTotal};
+}
+function renderRecords(){
+  const list=document.getElementById('recordList'); list.innerHTML=''; let items=state.transactions.slice();
+  if(currentFilter!=='all'){if(currentFilter==='advance')items=items.filter(x=>x.isAdvance); else items=items.filter(x=>x.type===currentFilter);}
+  if(!items.length){list.innerHTML='<div class="empty">Kayıt yok.</div>'; return;}
+  items.forEach(t=>{const div=document.createElement('div'); div.className='item'; div.innerHTML='<div class="row"><div><div class="title">'+(t.description||t.category||'Kayıt')+'</div><div class="sub">'+fmtDate(t.date)+' • '+t.type+' • '+(t.category||'Diğer')+' • '+(t.method||'')+(t.isAdvance?' • Geri alınacak iş harcaması':'')+'</div></div><div class="'+(t.type==='gelir'?'green':'red')+' title">'+(t.type==='gelir'?'+':'-')+' '+money(t.amount)+'</div></div><div class="right" style="margin-top:10px"><button class="danger" onclick="deleteTransaction('+t.id+')">Sil</button></div>'; list.appendChild(div);});
 }
 function render(){
   const c=calc();
   document.getElementById('today').textContent=new Date().toLocaleDateString('tr-TR');
-  document.getElementById('todayIncome').textContent=money(c.todayIncome);
-  document.getElementById('todayExpense').textContent=money(c.todayExpense);
-  document.getElementById('cashTotal').textContent=money(c.cash);
-  document.getElementById('todayNet').textContent=money(c.todayIncome-c.todayExpense);
-  document.getElementById('receivableTotal').textContent=money(c.receivable);
-  document.getElementById('debtTotal').textContent=money(c.debt);
-  document.getElementById('monthIncome').textContent=money(c.monthIncome);
-  document.getElementById('monthExpense').textContent=money(c.monthExpense);
-
-  const recent=document.getElementById('recentList');
-  recent.innerHTML='';
-  const all=[...state.transactions.map(x=>({...x, _kind:'tx'})), ...state.people.map(x=>({...x,_kind:'person'}))]
-    .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-  const top=all.slice(0,8);
-  if(!top.length) recent.innerHTML='<div class="empty">Henüz kayıt yok.</div>';
+  document.getElementById('todayIncome').textContent=money(c.todayIncome); document.getElementById('todayExpense').textContent=money(c.todayExpense); document.getElementById('cashTotal').textContent=money(c.cash); document.getElementById('todayNet').textContent=money(c.todayIncome-c.todayExpense); document.getElementById('receivableTotal').textContent=money(c.receivable); document.getElementById('debtTotal').textContent=money(c.debt); document.getElementById('cardLimitTotal').textContent=money(c.cardLimitTotal); document.getElementById('cardDebtTotal').textContent=money(c.cardDebtTotal); document.getElementById('cardAvailTotal').textContent=money(c.cardAvailTotal); document.getElementById('businessAdvanceTotal').textContent=money(c.businessAdvance);
+  const recent=document.getElementById('recentList'); recent.innerHTML='';
+  const all=state.transactions.map(x=>Object.assign({_kind:'tx'},x)).concat(state.people.map(x=>Object.assign({_kind:'person'},x))).concat(state.cards.map(x=>Object.assign({_kind:'card',date:x.due||''},x))).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const top=all.slice(0,10);
+  if(!top.length)recent.innerHTML='<div class="empty">Henüz kayıt yok.</div>';
   top.forEach(x=>{
     const div=document.createElement('div'); div.className='item';
-    if(x._kind==='tx'){
-      div.innerHTML=`<div class="row"><div><div class="title">${x.description||x.category||'Kayıt'}</div><div class="sub">${fmtDate(x.date)} • ${x.category||'Diğer'} • ${x.method||''}</div></div><div class="${x.type==='gelir'?'green':'red'} title">${x.type==='gelir'?'+':'-'} ${money(x.amount)}</div></div>`;
-    } else {
-      const settled=(x.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0);
-      const remain=Math.max(0, Number(x.amount)-settled);
-      div.innerHTML=`<div class="row"><div><div class="title">${x.name}</div><div class="sub">${fmtDate(x.date)} • ${x.type==='alacak'?'Alacak':'Borç'}</div></div><div class="${x.type==='alacak'?'green':'red'} title">${money(remain)}</div></div>`;
-    }
+    if(x._kind==='tx'){div.innerHTML='<div class="row"><div><div class="title">'+(x.description||x.category||'Kayıt')+'</div><div class="sub">'+fmtDate(x.date)+' • '+(x.category||'Diğer')+(x.isAdvance?' • Geri alınacak':'')+'</div></div><div class="'+(x.type==='gelir'?'green':'red')+' title">'+(x.type==='gelir'?'+':'-')+' '+money(x.amount)+'</div></div>';}
+    else if(x._kind==='card'){div.innerHTML='<div class="row"><div><div class="title">Kart: '+x.name+'</div><div class="sub">Son ödeme '+(x.due?fmtDate(x.due):'yok')+'</div></div><div class="orange title">'+money(x.debt||0)+'</div></div>';}
+    else {const settled=(x.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0), remain=Math.max(0,Number(x.amount)-settled); div.innerHTML='<div class="row"><div><div class="title">'+x.name+'</div><div class="sub">'+fmtDate(x.date)+' • '+(x.type==='alacak'?'Alacak':'Borç')+'</div></div><div class="'+(x.type==='alacak'?'green':'red')+' title">'+money(remain)+'</div></div>';}
     recent.appendChild(div);
   });
-
-  const peopleList=document.getElementById('peopleList');
-  peopleList.innerHTML='';
-  if(!state.people.length) peopleList.innerHTML='<div class="empty">Henüz kişi kaydı yok.</div>';
-  state.people.forEach(p=>{
-    const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0);
-    const remain=Math.max(0, Number(p.amount)-settled);
-    const div=document.createElement('div'); div.className='item';
-    const hist=(p.settlements||[]).slice().reverse().map(s=>`<div class="sub">• ${fmtDate(s.date)} ${money(s.amount)} işlem</div>`).join('');
-    div.innerHTML=`<div class="row"><div><div class="title">${p.name}</div><div class="sub">${p.type==='alacak'?'Bana borçlu':'Ben borçluyum'} • ${fmtDate(p.date)} ${p.note?('• '+p.note):''}</div></div><div class="${p.type==='alacak'?'green':'red'} title">${money(remain)}</div></div>
-    <div class="hint">İlk tutar: ${money(p.amount)} • Kalan: ${money(remain)}</div>${hist}
-    <div class="right" style="margin-top:10px">
-      <button onclick="settlementPrompt(${p.id})">Ödeme/Tahsilat</button>
-      <button class="danger" onclick="deletePerson(${p.id})">Sil</button>
-    </div>`;
-    peopleList.appendChild(div);
-  });
-
-  const recordList=document.getElementById('recordList');
-  recordList.innerHTML='';
-  if(!state.transactions.length) recordList.innerHTML='<div class="empty">Henüz gelir/gider kaydı yok.</div>';
-  state.transactions.forEach(t=>{
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${t.description||t.category||'Kayıt'}</div><div class="sub">${fmtDate(t.date)} • ${t.type} • ${t.category||'Diğer'} • ${t.method||''}</div></div><div class="${t.type==='gelir'?'green':'red'} title">${t.type==='gelir'?'+':'-'} ${money(t.amount)}</div></div>
-    <div class="right" style="margin-top:10px"><button class="danger" onclick="deleteTransaction(${t.id})">Sil</button></div>`;
-    recordList.appendChild(div);
-  });
-
-  const categorySummary=document.getElementById('categorySummary');
-  categorySummary.innerHTML='';
-  const entries=Object.entries(c.cats).sort((a,b)=>b[1]-a[1]);
-  if(!entries.length) categorySummary.innerHTML='<div class="empty">Henüz özet yok.</div>';
-  entries.forEach(([k,v])=>{
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div class="title">${k}</div><div class="title">${money(v)}</div></div>`;
-    categorySummary.appendChild(div);
-  });
+  const peopleList=document.getElementById('peopleList'); peopleList.innerHTML='';
+  if(!state.people.length)peopleList.innerHTML='<div class="empty">Henüz kişi kaydı yok.</div>';
+  state.people.forEach(p=>{const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0), remain=Math.max(0,Number(p.amount)-settled); const hist=(p.settlements||[]).slice().reverse().map(s=>'<div class="sub">• '+fmtDate(s.date)+' '+money(s.amount)+' işlem</div>').join(''); const div=document.createElement('div'); div.className='item'; div.innerHTML='<div class="row"><div><div class="title">'+p.name+'</div><div class="sub">'+(p.type==='alacak'?'Bana borçlu':'Ben borçluyum')+' • '+fmtDate(p.date)+(p.note?(' • '+p.note):'')+'</div></div><div class="'+(p.type==='alacak'?'green':'red')+' title">'+money(remain)+'</div></div><div class="hint">İlk tutar: '+money(p.amount)+' • Kalan: '+money(remain)+'</div>'+hist+'<div class="right" style="margin-top:10px"><button onclick="settlementPrompt('+p.id+')">Ödeme/Tahsilat</button><button class="danger" onclick="deletePerson('+p.id+')">Sil</button></div>'; peopleList.appendChild(div);});
+  const cardList=document.getElementById('cardList'); cardList.innerHTML='';
+  if(!state.cards.length)cardList.innerHTML='<div class="empty">Henüz kredi kartı yok.</div>';
+  state.cards.forEach(ca=>{const avail=Number(ca.limit||0)-Number(ca.debt||0); const div=document.createElement('div'); div.className='item'; div.innerHTML='<div class="row"><div><div class="title">'+ca.name+'</div><div class="sub">Limit '+money(ca.limit)+' • Son ödeme '+(ca.due?fmtDate(ca.due):'yok')+'</div></div><div class="orange title">'+money(ca.debt||0)+'</div></div><div class="hint">Kullanılabilir limit: '+money(avail)+'</div><div class="right" style="margin-top:10px"><button onclick="cardDebtPrompt('+ca.id+')">Borcu Güncelle</button><button class="danger" onclick="deleteCard('+ca.id+')">Sil</button></div>'; cardList.appendChild(div);});
+  renderRecords();
 }
-function exportData(){
-  const blob=new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='hesap_takip_yedek.json';
-  a.click();
-}
-function restoreData(ev){
-  const file=ev.target.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=()=>{
-    try{
-      const parsed=JSON.parse(reader.result);
-      if(!parsed.transactions || !parsed.people) throw new Error();
-      state=parsed;
-      save();
-      alert('Yedek geri yüklendi.');
-    }catch(e){ alert('Geçersiz yedek dosyası.'); }
-  };
-  reader.readAsText(file);
-}
-document.getElementById('tarih').value=todayStr();
-document.getElementById('kisiTarih').value=todayStr();
-render();
+function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='hesap_takip_yedek.json'; a.click();}
+function restoreData(ev){const file=ev.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=function(){try{const parsed=JSON.parse(reader.result); if(!parsed.transactions || !parsed.people) throw new Error(); state=Object.assign(clone(DEFAULTS), parsed); save(); alert('Yedek geri yüklendi.');}catch(e){alert('Geçersiz yedek dosyası.');}}; reader.readAsText(file);}
+function setPin(){const v=document.getElementById('newPin').value.trim(); if(v.length<4){alert('En az 4 haneli şifre gir.'); return;} state.settings.pin=v; save(); document.getElementById('newPin').value=''; alert('Şifre kaydedildi.');}
+function clearPin(){state.settings.pin=''; save(); alert('Şifre kaldırıldı.');}
+function maybeShowPin(){const pin=(state.settings&&state.settings.pin)||''; if(!pin)return; document.getElementById('pinOverlay').classList.remove('hidden');}
+function submitPin(){const v=document.getElementById('pinInput').value; if(v===state.settings.pin){document.getElementById('pinOverlay').classList.add('hidden'); document.getElementById('pinInput').value='';} else {alert('Şifre yanlış.');}}
+function skipPin(){document.getElementById('pinOverlay').classList.add('hidden');}
+document.getElementById('tarih').value=todayStr(); document.getElementById('kisiTarih').value=todayStr(); rebuildCategoryOptions(); render(); maybeShowPin();
 </script>
 </body>
 </html>
