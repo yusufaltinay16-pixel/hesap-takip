@@ -93,6 +93,11 @@ window.onerror = function(message, source, lineno, colno, error) {
       <button class="primary" onclick="go('people');openPersonForm('alacak')">Borç / Alacak</button>
     </div>
 
+    <div class="card" style="margin-bottom:12px">
+      <div class="row"><div class="title">Son İşlemler</div><div class="small muted">Gelir / gider kayıtları</div></div>
+      <div id="transactionList" class="list" style="margin-top:10px"></div>
+    </div>
+
     <div class="card">
       <div class="row"><div class="title">Yaklaşan Hatırlatmalar</div><div class="small muted">7 gün içinde</div></div>
       <div id="reminderList" class="list" style="margin-top:10px"></div>
@@ -311,6 +316,12 @@ function saveBank(){
   save();
 }
 function deleteBank(id){if(!confirm('Banka hesabını silmek istiyor musun?'))return; state.banks=state.banks.filter(x=>String(x.id)!==String(id)); save();}
+function editBank(id){
+  const b=state.banks.find(x=>String(x.id)===String(id)); if(!b)return;
+  const name=prompt('Banka / hesap adı', b.name); if(name===null || !name.trim()) return;
+  const balance=prompt('Başlangıç bakiye', b.balance ?? 0); if(balance===null) return;
+  b.name=name.trim(); b.balance=Number(balance||0); save();
+}
 
 function toggleCardForm(){document.getElementById('cardForm').classList.toggle('hidden');}
 function saveCard(){
@@ -321,6 +332,14 @@ function saveCard(){
   save();
 }
 function deleteCard(id){if(!confirm('Kartı silmek istiyor musun?'))return; state.cards=state.cards.filter(x=>String(x.id)!==String(id)); save();}
+function editCard(id){
+  const c=state.cards.find(x=>String(x.id)===String(id)); if(!c)return;
+  const name=prompt('Kart adı / banka', c.name); if(name===null || !name.trim()) return;
+  const limit=prompt('Kart limiti', c.limit ?? 0); if(limit===null) return;
+  const debt=prompt('Kart borcu', c.debt ?? 0); if(debt===null) return;
+  const due=prompt('Son ödeme tarihi (YYYY-AA-GG)', c.due || ''); if(due===null) return;
+  c.name=name.trim(); c.limit=Number(limit||0); c.debt=Number(debt||0); c.due=due.trim(); save();
+}
 function cardDebtPrompt(id){
   const c=state.cards.find(x=>String(x.id)===String(id)); if(!c)return;
   const raw=prompt('Yeni kart borcunu gir', c.debt||0); if(raw===null)return;
@@ -365,7 +384,59 @@ function settlementPrompt(id){
   p.settlements.push({id:'s'+Date.now()+Math.random(), amount, date:todayStr()}); save();
 }
 function deletePerson(id){if(!confirm('Bu kişi kaydını silmek istiyor musun?'))return; state.people=state.people.filter(x=>String(x.id)!==String(id)); save();}
+function editPerson(id){
+  const p=state.people.find(x=>String(x.id)===String(id)); if(!p)return;
+  const name=prompt('Kişi / hesap adı', p.name); if(name===null || !name.trim()) return;
+  const type=prompt('Tür: alacak veya borc', p.type); if(type===null) return;
+  const amount=prompt('Tutar', p.amount ?? 0); if(amount===null) return;
+  const date=prompt('Tarih (YYYY-AA-GG)', p.date || todayStr()); if(date===null) return;
+  const due=prompt('Vade tarihi (YYYY-AA-GG)', p.dueDate || ''); if(due===null) return;
+  const note=prompt('Not', p.note || ''); if(note===null) return;
+  p.name=name.trim(); p.type=(type==='borc'?'borc':'alacak'); p.amount=Number(amount||0); p.date=date.trim()||todayStr(); p.dueDate=due.trim(); p.note=note.trim(); save();
+}
 function deleteTransaction(id){if(!confirm('Bu işlemi silmek istiyor musun?'))return; state.transactions=state.transactions.filter(x=>String(x.id)!==String(id)); save();}
+function editTransaction(id){
+  const t=state.transactions.find(x=>String(x.id)===String(id)); if(!t)return;
+  const type=prompt('Tür: gelir veya gider', t.type); if(type===null) return;
+  const amount=prompt('Tutar', t.amount ?? 0); if(amount===null) return;
+  const description=prompt('Açıklama', t.description || ''); if(description===null) return;
+  const category=prompt('Kategori', t.category || ''); if(category===null) return;
+  const date=prompt('Tarih (YYYY-AA-GG)', t.date || todayStr()); if(date===null) return;
+  const method=prompt('Kanal: Nakit / IBAN / Kart', t.method || 'Nakit'); if(method===null) return;
+  let normalizedMethod='Nakit';
+  if(method.toLowerCase()==='iban') normalizedMethod='IBAN';
+  else if(method.toLowerCase()==='kart') normalizedMethod='Kart';
+  let sourceId='cash';
+  if(normalizedMethod==='IBAN'){
+    if(!state.banks.length){alert('Önce banka hesabı eklemelisin.'); return;}
+    const bankNames=state.banks.map(x=>x.name).join(', ');
+    const chosen=prompt('Banka adı seç. Mevcut: '+bankNames, (state.banks.find(x=>String(x.id)===String(t.sourceId))||state.banks[0]).name);
+    if(chosen===null) return;
+    const bank=state.banks.find(x=>x.name.toLowerCase()===chosen.trim().toLowerCase());
+    if(!bank){alert('Banka bulunamadı. Adı tam yaz.'); return;}
+    sourceId=bank.id;
+  }
+  if(normalizedMethod==='Kart'){
+    if(!state.cards.length){alert('Önce kart eklemelisin.'); return;}
+    const cardNames=state.cards.map(x=>x.name).join(', ');
+    const chosen=prompt('Kart adı seç. Mevcut: '+cardNames, (state.cards.find(x=>String(x.id)===String(t.sourceId))||state.cards[0]).name);
+    if(chosen===null) return;
+    const card=state.cards.find(x=>x.name.toLowerCase()===chosen.trim().toLowerCase());
+    if(!card){alert('Kart bulunamadı. Adı tam yaz.'); return;}
+    sourceId=card.id;
+  }
+  t.type=(type==='gider'?'gider':'gelir');
+  t.amount=Number(amount||0);
+  t.description=description.trim();
+  t.category=category.trim();
+  t.date=date.trim()||todayStr();
+  t.method=normalizedMethod;
+  t.sourceType=normalizedMethod;
+  t.sourceId=sourceId;
+  t.isAdvance=t.type==='gider' && isAdvanceExpense(t.category);
+  save();
+}
+function deleteClosing(id){if(!confirm('Bu kapanış kaydını silmek istiyor musun?'))return; state.closings=state.closings.filter(x=>String(x.id)!==String(id)); save();}
 
 function calcBalances(){
   let cash=Number(state.cashInitial||0);
@@ -432,12 +503,22 @@ function render(){
   document.getElementById('monthExpense').textContent=money(c.monthExpense);
   document.getElementById('cashInitial').value=Number(state.cashInitial||0);
 
+  const transactionList=document.getElementById('transactionList'); transactionList.innerHTML='';
+  if(!state.transactions.length) transactionList.innerHTML='<div class="empty">Henüz gelir / gider işlemi yok.</div>';
+  state.transactions.slice(0,30).forEach(t=>{
+    const div=document.createElement('div'); div.className='item';
+    const color=t.type==='gelir'?'green':'red';
+    const sourceName=t.method==='IBAN' ? ((state.banks.find(x=>String(x.id)===String(t.sourceId))||{}).name||'Banka') : t.method==='Kart' ? ((state.cards.find(x=>String(x.id)===String(t.sourceId))||{}).name||'Kart') : 'Nakit Kasa';
+    div.innerHTML=`<div class="row"><div><div class="title">${t.description||t.category||'İşlem'}</div><div class="sub">${fmtDate(t.date)} • ${t.type==='gelir'?'Gelir':'Gider'} • ${t.category||'Kategori yok'} • ${t.method} / ${sourceName}</div></div><div class="${color} title">${money(t.amount)}</div></div><div class="right" style="margin-top:10px"><button onclick="editTransaction('${t.id}')">Düzenle</button><button class="danger" onclick="deleteTransaction('${t.id}')">Sil</button></div>`;
+    transactionList.appendChild(div);
+  });
+
   const bankList=document.getElementById('bankList'); bankList.innerHTML='';
   if(!state.banks.length) bankList.innerHTML='<div class="empty">Henüz banka hesabı yok.</div>';
   state.banks.forEach(b=>{
     const bal=Number(c.bankBalances[b.id] ?? b.balance ?? 0);
     const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${b.name}</div><div class="sub">Güncel bakiye</div></div><div class="yellow title">${money(bal)}</div></div><div class="right" style="margin-top:10px"><button class="danger" onclick="deleteBank('${b.id}')">Sil</button></div>`;
+    div.innerHTML=`<div class="row"><div><div class="title">${b.name}</div><div class="sub">Güncel bakiye</div></div><div class="yellow title">${money(bal)}</div></div><div class="right" style="margin-top:10px"><button onclick="editBank('${b.id}')">Düzenle</button><button class="danger" onclick="deleteBank('${b.id}')">Sil</button></div>`;
     bankList.appendChild(div);
   });
 
@@ -446,7 +527,7 @@ function render(){
   state.cards.forEach(ca=>{
     const debt=Number(c.cardDebts[ca.id] ?? ca.debt ?? 0), avail=Number(ca.limit||0)-debt;
     const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${ca.name}</div><div class="sub">Limit ${money(ca.limit)} • Son ödeme ${ca.due?fmtDate(ca.due):'yok'}</div></div><div class="orange title">${money(debt)}</div></div><div class="hint">Kullanılabilir limit: ${money(avail)}</div><div class="right" style="margin-top:10px"><button onclick="cardDebtPrompt('${ca.id}')">Borcu Güncelle</button><button class="danger" onclick="deleteCard('${ca.id}')">Sil</button></div>`;
+    div.innerHTML=`<div class="row"><div><div class="title">${ca.name}</div><div class="sub">Limit ${money(ca.limit)} • Son ödeme ${ca.due?fmtDate(ca.due):'yok'}</div></div><div class="orange title">${money(debt)}</div></div><div class="hint">Kullanılabilir limit: ${money(avail)}</div><div class="right" style="margin-top:10px"><button onclick="editCard('${ca.id}')">Düzenle</button><button onclick="cardDebtPrompt('${ca.id}')">Borcu Güncelle</button><button class="danger" onclick="deleteCard('${ca.id}')">Sil</button></div>`;
     cardList.appendChild(div);
   });
 
@@ -456,7 +537,7 @@ function render(){
     const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0), remain=Math.max(0,Number(p.amount)-settled), due=p.dueDate?(' • Vade '+fmtDate(p.dueDate)):'';
     const hist=(p.settlements||[]).slice().reverse().map(s=>`<div class="sub">• ${fmtDate(s.date)} ${money(s.amount)} işlem</div>`).join('');
     const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${p.name}</div><div class="sub">${p.type==='alacak'?'Bana borçlu':'Ben borçluyum'} • ${fmtDate(p.date)}${due}${p.note?(' • '+p.note):''}</div></div><div class="${p.type==='alacak'?'green':'red'} title">${money(remain)}</div></div><div class="hint">İlk tutar: ${money(p.amount)} • Kalan: ${money(remain)}</div>${hist}<div class="right" style="margin-top:10px"><button onclick="settlementPrompt('${p.id}')">Ödeme/Tahsilat</button><button class="danger" onclick="deletePerson('${p.id}')">Sil</button></div>`;
+    div.innerHTML=`<div class="row"><div><div class="title">${p.name}</div><div class="sub">${p.type==='alacak'?'Bana borçlu':'Ben borçluyum'} • ${fmtDate(p.date)}${due}${p.note?(' • '+p.note):''}</div></div><div class="${p.type==='alacak'?'green':'red'} title">${money(remain)}</div></div><div class="hint">İlk tutar: ${money(p.amount)} • Kalan: ${money(remain)}</div>${hist}<div class="right" style="margin-top:10px"><button onclick="editPerson('${p.id}')">Düzenle</button><button onclick="settlementPrompt('${p.id}')">Ödeme/Tahsilat</button><button class="danger" onclick="deletePerson('${p.id}')">Sil</button></div>`;
     peopleList.appendChild(div);
   });
 
@@ -497,7 +578,7 @@ function render(){
   if(!state.closings.length) closingList.innerHTML='<div class="empty">Henüz kapanış yok.</div>';
   state.closings.forEach(cl=>{
     const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${fmtDate(cl.date)}</div><div class="sub">${cl.note||'Not yok'}</div></div><div class="blue title">${money(cl.generalTotal)}</div></div><div class="sub">Nakit ${money(cl.cashOnHand)} • Banka ${money(cl.bankTotal)} • Kart Borcu ${money(cl.cardDebtTotal)} • Günlük Kar ${money(cl.profitToday)}</div>`;
+    div.innerHTML=`<div class="row"><div><div class="title">${fmtDate(cl.date)}</div><div class="sub">${cl.note||'Not yok'}</div></div><div class="blue title">${money(cl.generalTotal)}</div></div><div class="sub">Nakit ${money(cl.cashOnHand)} • Banka ${money(cl.bankTotal)} • Kart Borcu ${money(cl.cardDebtTotal)} • Günlük Kar ${money(cl.profitToday)}</div><div class="right" style="margin-top:10px"><button class="danger" onclick="deleteClosing('${cl.id}')">Sil</button></div>`;
     closingList.appendChild(div);
   });
 
