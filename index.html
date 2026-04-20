@@ -1,610 +1,87 @@
-<!doctype html>
-<script>
-window.onerror = function(message, source, lineno, colno, error) {
-  alert("HATA: " + message + " satır:" + lineno);
-};
-</script>
-
+<!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0b0f">
-  <title>Hesap Takip Pro</title>
-  <style>
-    :root{--bg:#0b0b0f;--card:#16181d;--line:#2a2d34;--text:#f5f7fb;--muted:#a7afbd;--green:#19c37d;--red:#ef4444;--blue:#4f8cff;--yellow:#eab308;--orange:#fb923c}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 100px}
-    .top{display:flex;justify-content:space-between;align-items:center;margin:8px 0 16px}
-    h1{font-size:30px;margin:0}.muted{color:var(--muted);font-size:14px}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
-    .label{color:var(--muted);font-size:13px;margin-bottom:8px}.value{font-size:24px;font-weight:800}
-    .green{color:var(--green)} .red{color:var(--red)} .blue{color:var(--blue)} .yellow{color:var(--yellow)} .orange{color:var(--orange)}
-    .actions{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0}
-    button{border:none;background:#1e222a;color:var(--text);padding:12px 14px;border-radius:16px;font-size:15px;font-weight:700}
-    .primary{background:#232a35}.danger{background:#39181b}.ok{background:#133023}.warn{background:#3a2e14}
-    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px}
-    .tab{padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:#111318;color:var(--text)}
-    .tab.active{background:#1d2330}
-    .section{display:none}.section.active{display:block}
-    .list{display:flex;flex-direction:column;gap:10px}
-    .item{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px}
-    .row{display:flex;justify-content:space-between;gap:12px;align-items:center}
-    .title{font-weight:700}.sub{font-size:13px;color:var(--muted);margin-top:4px}
-    input,select{width:100%;background:#111318;color:var(--text);border:1px solid var(--line);border-radius:14px;padding:12px 13px;font-size:16px}
-    .form{display:grid;gap:12px}.inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}.triple{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-    .bottom{position:fixed;left:0;right:0;bottom:0;background:rgba(11,11,15,.94);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:10px}
-    .bottom button{padding:10px 8px;font-size:12px;border-radius:12px}
-    .small{font-size:12px}.right{display:flex;gap:8px;flex-wrap:wrap}
-    .empty{padding:24px;text-align:center;color:var(--muted)}.hint{font-size:12px;color:var(--muted);margin-top:6px}
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:20px;z-index:9999}
-    .modal{width:min(420px,100%);background:#111318;border:1px solid var(--line);border-radius:22px;padding:20px}.hidden{display:none!important}
-    .pill{display:inline-block;padding:5px 8px;border-radius:999px;background:#111318;border:1px solid var(--line);font-size:12px}
-    .bar{height:12px;border-radius:999px;background:#111318;border:1px solid var(--line);overflow:hidden}
-    .fill{height:100%;background:#4f8cff}
-    @media (max-width:900px){.grid3{grid-template-columns:1fr}}
-    @media (max-width:760px){.triple{grid-template-columns:1fr}}
-    @media (max-width:560px){.grid,.actions,.inline{grid-template-columns:1fr 1fr}.value{font-size:22px}h1{font-size:26px}.bottom{grid-template-columns:repeat(6,1fr)}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hesap Takip Pro (Bulut)</title>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBIFfk3-r8GE34GQ764qDEiDZ79org75XE",
+  authDomain: "hesap-takip-2ec1e.firebaseapp.com",
+  projectId: "hesap-takip-2ec1e",
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+window.addData = async function(type){
+  const amount = document.getElementById("amount").value;
+  const note = document.getElementById("note").value;
+
+  if(!amount) return alert("Tutar gir");
+
+  await addDoc(collection(db, "transactions"), {
+    type,
+    amount: Number(amount),
+    note,
+    date: new Date()
+  });
+
+  alert("Kaydedildi");
+  loadData();
+}
+
+window.loadData = async function(){
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  const querySnapshot = await getDocs(collection(db, "transactions"));
+
+  querySnapshot.forEach((docSnap)=>{
+    const d = docSnap.data();
+
+    const div = document.createElement("div");
+    div.innerHTML = `
+      ${d.type} - ₺${d.amount} 
+      <button onclick="sil('${docSnap.id}')">Sil</button>
+    `;
+    list.appendChild(div);
+  });
+}
+
+window.sil = async function(id){
+  await deleteDoc(doc(db, "transactions", id));
+  loadData();
+}
+
+window.onload = loadData;
+</script>
+
+<style>
+body{background:#111;color:white;font-family:Arial;padding:20px}
+input{padding:10px;margin:5px}
+button{padding:10px;margin:5px}
+</style>
+
 </head>
 <body>
-<div id="pinOverlay" class="overlay hidden">
-  <div class="modal">
-    <div class="title" style="font-size:22px;margin-bottom:8px">Hesap Takip Pro</div>
-    <div class="muted">Uygulamayı açmak için şifre gir.</div>
-    <div class="form" style="margin-top:14px">
-      <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="Şifre">
-      <div class="inline">
-        <button class="ok" onclick="submitPin()">Devam</button>
-        <button class="warn" onclick="skipPin()">Şimdilik Kapat</button>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="wrap">
-  <div class="top">
-    <div>
-      <h1>Hesap Takip Pro</h1>
-      <div class="muted">Profesyonel finans, hesap ve rapor paneli</div>
-    </div>
-    <div class="muted" id="today"></div>
-  </div>
+<h2>Hesap Takip (Bulutlu)</h2>
 
-  <div id="home" class="section active">
-    <div class="grid">
-      <div class="card"><div class="label">Genel Kasa</div><div class="value blue" id="generalTotal">0 ₺</div></div>
-      <div class="card"><div class="label">Nakit Toplam</div><div class="value green" id="cashOnHand">0 ₺</div></div>
-      <div class="card"><div class="label">Banka Toplam</div><div class="value yellow" id="bankTotal">0 ₺</div></div>
-      <div class="card"><div class="label">Kart Borcu Toplam</div><div class="value orange" id="cardDebtTotal">0 ₺</div></div>
-      <div class="card"><div class="label">Bugünkü Gelir</div><div class="value green" id="todayIncome">0 ₺</div></div>
-      <div class="card"><div class="label">Bugünkü Gider</div><div class="value red" id="todayExpense">0 ₺</div></div>
-      <div class="card"><div class="label">Toplam Alacak</div><div class="value green" id="receivableTotal">0 ₺</div></div>
-      <div class="card"><div class="label">Toplam Borç</div><div class="value red" id="debtTotal">0 ₺</div></div>
-    </div>
+<input id="amount" placeholder="Tutar">
+<input id="note" placeholder="Açıklama">
 
-    <div class="actions">
-      <button class="primary" onclick="go('add');setType('gelir')">Gelir Ekle</button>
-      <button class="primary" onclick="go('add');setType('gider')">Gider Ekle</button>
-      <button class="primary" onclick="go('accounts')">Hesaplar</button>
-      <button class="primary" onclick="go('people');openPersonForm('alacak')">Borç / Alacak</button>
-    </div>
+<br>
 
-    <div class="card" style="margin-bottom:12px">
-      <div class="row"><div class="title">Son İşlemler</div><div class="small muted">Gelir / gider kayıtları</div></div>
-      <div id="transactionList" class="list" style="margin-top:10px"></div>
-    </div>
+<button onclick="addData('Gelir')">Gelir Ekle</button>
+<button onclick="addData('Gider')">Gider Ekle</button>
 
-    <div class="card">
-      <div class="row"><div class="title">Yaklaşan Hatırlatmalar</div><div class="small muted">7 gün içinde</div></div>
-      <div id="reminderList" class="list" style="margin-top:10px"></div>
-    </div>
-  </div>
+<h3>Kayıtlar</h3>
+<div id="list"></div>
 
-  <div id="add" class="section">
-    <div class="card">
-      <div class="tabs">
-        <button id="tab-gelir" class="tab active" onclick="setType('gelir')">Gelir</button>
-        <button id="tab-gider" class="tab" onclick="setType('gider')">Gider</button>
-      </div>
-      <div class="form">
-        <input id="tutar" type="number" step="0.01" placeholder="Tutar">
-        <input id="aciklama" placeholder="Açıklama">
-        <select id="kategori"></select>
-        <div class="inline">
-          <input id="tarih" type="date">
-          <select id="kanal" onchange="rebuildSourceOptions()">
-            <option value="Nakit">Nakit</option>
-            <option value="IBAN">IBAN</option>
-            <option value="Kart">Kart</option>
-          </select>
-        </div>
-        <select id="kaynakSecim"></select>
-        <button class="ok" onclick="saveTransaction()">Kaydet</button>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:12px">
-      <div class="title">Kart Borcu Ödeme</div>
-      <div class="form" style="margin-top:12px">
-        <select id="payCard"></select>
-        <input id="payCardAmount" type="number" step="0.01" placeholder="Ödenen tutar">
-        <select id="payCardChannel" onchange="rebuildPaymentSourceOptions()">
-          <option value="Nakit">Nakit</option>
-          <option value="IBAN">IBAN</option>
-        </select>
-        <select id="payCardSource"></select>
-        <button class="ok" onclick="payCardDebt()">Kart Borcu Öde</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="accounts" class="section">
-    <div class="card">
-      <div class="title">Nakit</div>
-      <div class="form" style="margin-top:12px">
-        <input id="cashInitial" type="number" step="0.01" placeholder="Başlangıç nakit">
-        <button class="ok" onclick="setInitialCash()">Kaydet / Güncelle</button>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:12px">
-      <div class="row"><div class="title">Banka Hesapları</div><button onclick="toggleBankForm()">+ Banka Hesabı Ekle</button></div>
-      <div id="bankForm" class="form hidden" style="margin-top:12px">
-        <input id="bankName" placeholder="Banka / hesap adı">
-        <input id="bankBalance" type="number" step="0.01" placeholder="Başlangıç bakiye">
-        <button class="ok" onclick="saveBank()">Kaydet</button>
-      </div>
-      <div id="bankList" class="list" style="margin-top:12px"></div>
-    </div>
-
-    <div class="card" style="margin-top:12px">
-      <div class="row"><div class="title">Kredi Kartları</div><button onclick="toggleCardForm()">+ Kart Ekle</button></div>
-      <div id="cardForm" class="form hidden" style="margin-top:12px">
-        <input id="cardName" placeholder="Kart adı / banka">
-        <div class="triple">
-          <input id="cardLimit" type="number" step="0.01" placeholder="Limit">
-          <input id="cardDebt" type="number" step="0.01" placeholder="Borç">
-          <input id="cardDue" type="date">
-        </div>
-        <button class="ok" onclick="saveCard()">Kaydet</button>
-      </div>
-      <div id="cardList" class="list" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div id="people" class="section">
-    <div class="card">
-      <div class="row"><div class="title">Borç / Alacak</div><div class="right">
-        <button onclick="openPersonForm('alacak')">+ Alacak</button>
-        <button onclick="openPersonForm('borc')">+ Borç</button>
-      </div></div>
-      <div id="personForm" style="display:none;margin-top:12px" class="form">
-        <input id="kisiAdi" placeholder="Kişi / hesap adı">
-        <select id="kisiTur">
-          <option value="alacak">Alacak (bana borçlu)</option>
-          <option value="borc">Borç (ben borçluyum)</option>
-        </select>
-        <input id="kisiTutar" type="number" step="0.01" placeholder="Tutar">
-        <div class="inline">
-          <input id="kisiTarih" type="date">
-          <input id="kisiVade" type="date">
-        </div>
-        <input id="kisiNot" placeholder="Not">
-        <button class="ok" onclick="savePersonRecord()">Kaydet</button>
-      </div>
-      <div id="peopleList" class="list" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div id="reports" class="section">
-    <div class="grid">
-      <div class="card"><div class="label">Bugünkü Kar</div><div class="value green" id="profitToday">0 ₺</div></div>
-      <div class="card"><div class="label">Bu Ay Kar</div><div class="value yellow" id="profitMonth">0 ₺</div></div>
-      <div class="card"><div class="label">Bu Ay Gelir</div><div class="value blue" id="monthIncome">0 ₺</div></div>
-      <div class="card"><div class="label">Bu Ay Gider</div><div class="value red" id="monthExpense">0 ₺</div></div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="title">Kategori Dağılımı</div>
-      <div id="categorySummary" class="list" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div id="closing" class="section">
-    <div class="card">
-      <div class="title">Gün Sonu Kapat</div>
-      <div class="hint">Bugünkü nakit, banka, kart ve kar durumunu fotoğraf gibi kaydeder.</div>
-      <div class="form" style="margin-top:12px">
-        <input id="closingNote" placeholder="Kapanış notu">
-        <button class="ok" onclick="createClosing()">Bugünü Kapat</button>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="title">Kasa Sayımı</div>
-      <div class="hint">Gerçek cebindeki nakdi gir. Sistem farkı söylesin.</div>
-      <div class="form" style="margin-top:12px">
-        <input id="countedCash" type="number" step="0.01" placeholder="Gerçek sayılan nakit">
-        <button class="ok" onclick="runCashCount()">Kasa Farkını Hesapla</button>
-      </div>
-      <div id="cashCountResult" class="hint" style="margin-top:12px"></div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="title">Kapanış Geçmişi</div>
-      <div id="closingList" class="list" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div id="settings" class="section">
-    <div class="card">
-      <div class="title">Şifre Ayarı</div>
-      <div class="form" style="margin-top:12px">
-        <input id="newPin" type="password" inputmode="numeric" maxlength="8" placeholder="Yeni şifre">
-        <div class="inline">
-          <button class="ok" onclick="setPin()">Şifreyi Kaydet</button>
-          <button class="danger" onclick="clearPin()">Şifreyi Kaldır</button>
-        </div>
-      </div>
-      <div class="hint">Arka plana gidince tekrar şifre ister.</div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="title">Yedek</div>
-      <div class="inline" style="margin-top:12px">
-        <button class="ok" onclick="exportData()">Yedeği Dışa Aktar</button>
-        <input id="restoreFile" type="file" accept=".json" onchange="restoreData(event)">
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="bottom">
-  <button onclick="go('home')">Ana</button>
-  <button onclick="go('add')">Ekle</button>
-  <button onclick="go('accounts')">Hesap</button>
-  <button onclick="go('reports')">Rapor</button>
-  <button onclick="go('closing')">Kapanış</button>
-  <button onclick="go('settings')">Ayar</button>
-</div>
-
-<script>
-const KEY='hesap_takip_data_v5';
-const DEFAULTS={transactions:[],people:[],cards:[],banks:[],closings:[],settings:{pin:''},cashInitial:0};
-const expenseCategories=['Şahsi Harcamam','Evime Harcamam','Şelale Gıda Harcamam','Foto Şelale Harcamam','Katlama Atölye Harcamam','Anneme Harcamam'];
-const incomeCategories=['Genel Gelir','Tahsilat','Diğer Gelir'];
-const advanceCategories=['Şelale Gıda Harcamam','Foto Şelale Harcamam','Katlama Atölye Harcamam','Anneme Harcamam'];
-let state=load(), currentType='gelir', isLocked=false;
-
-function todayStr(){return new Date().toISOString().slice(0,10);}
-function fmtDate(s){if(!s)return ''; const p=s.split('-'); return p[2]+'.'+p[1]+'.'+p[0];}
-function money(n){n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2}).format(n);}
-function clone(o){return JSON.parse(JSON.stringify(o));}
-function load(){try{return Object.assign(clone(DEFAULTS), JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){return clone(DEFAULTS);}}
-function save(){localStorage.setItem(KEY, JSON.stringify(state)); render();}
-function go(id){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active')); document.getElementById(id).classList.add('active');}
-function setType(t){currentType=t; document.getElementById('tab-gelir').classList.toggle('active', t==='gelir'); document.getElementById('tab-gider').classList.toggle('active', t==='gider'); rebuildCategoryOptions();}
-function rebuildCategoryOptions(){const s=document.getElementById('kategori'); const list=currentType==='gelir'?incomeCategories:expenseCategories; s.innerHTML=list.map(x=>'<option>'+x+'</option>').join('');}
-function rebuildSourceOptions(){
-  const kanal=document.getElementById('kanal').value, s=document.getElementById('kaynakSecim');
-  let arr=[];
-  if(kanal==='Nakit') arr=[['cash','Nakit Kasa']];
-  if(kanal==='IBAN') arr=state.banks.map(x=>[x.id,x.name]);
-  if(kanal==='Kart') arr=state.cards.map(x=>[x.id,x.name]);
-  s.innerHTML=arr.length?arr.map(([v,t])=>`<option value="${v}">${t}</option>`).join(''):'<option value="">Önce hesap ekle</option>';
-}
-function rebuildPaymentSourceOptions(){
-  const kanal=document.getElementById('payCardChannel').value, s=document.getElementById('payCardSource');
-  let arr=[];
-  if(kanal==='Nakit') arr=[['cash','Nakit Kasa']];
-  if(kanal==='IBAN') arr=state.banks.map(x=>[x.id,x.name]);
-  s.innerHTML=arr.length?arr.map(([v,t])=>`<option value="${v}">${t}</option>`).join(''):'<option value="">Önce hesap ekle</option>';
-}
-function rebuildCardOptions(){
-  const s=document.getElementById('payCard');
-  s.innerHTML=state.cards.length?state.cards.map(x=>`<option value="${x.id}">${x.name}</option>`).join(''):'<option value="">Önce kart ekle</option>';
-}
-function isAdvanceExpense(cat){return advanceCategories.includes(cat);}
-
-function setInitialCash(){state.cashInitial=Number(document.getElementById('cashInitial').value||0); save();}
-function toggleBankForm(){document.getElementById('bankForm').classList.toggle('hidden');}
-function saveBank(){
-  const name=document.getElementById('bankName').value.trim(), balance=Number(document.getElementById('bankBalance').value||0);
-  if(!name){alert('Banka adı gir.'); return;}
-  state.banks.unshift({id:'b'+Date.now()+Math.random(), name, balance});
-  document.getElementById('bankName').value=''; document.getElementById('bankBalance').value='';
-  save();
-}
-function deleteBank(id){if(!confirm('Banka hesabını silmek istiyor musun?'))return; state.banks=state.banks.filter(x=>String(x.id)!==String(id)); save();}
-function editBank(id){
-  const b=state.banks.find(x=>String(x.id)===String(id)); if(!b)return;
-  const name=prompt('Banka / hesap adı', b.name); if(name===null || !name.trim()) return;
-  const balance=prompt('Başlangıç bakiye', b.balance ?? 0); if(balance===null) return;
-  b.name=name.trim(); b.balance=Number(balance||0); save();
-}
-
-function toggleCardForm(){document.getElementById('cardForm').classList.toggle('hidden');}
-function saveCard(){
-  const name=document.getElementById('cardName').value.trim(), limit=Number(document.getElementById('cardLimit').value||0), debt=Number(document.getElementById('cardDebt').value||0);
-  if(!name || !limit){alert('Kart adı ve limit gir.'); return;}
-  state.cards.unshift({id:'c'+Date.now()+Math.random(), name, limit, debt, due:document.getElementById('cardDue').value||''});
-  document.getElementById('cardName').value=''; document.getElementById('cardLimit').value=''; document.getElementById('cardDebt').value=''; document.getElementById('cardDue').value='';
-  save();
-}
-function deleteCard(id){if(!confirm('Kartı silmek istiyor musun?'))return; state.cards=state.cards.filter(x=>String(x.id)!==String(id)); save();}
-function editCard(id){
-  const c=state.cards.find(x=>String(x.id)===String(id)); if(!c)return;
-  const name=prompt('Kart adı / banka', c.name); if(name===null || !name.trim()) return;
-  const limit=prompt('Kart limiti', c.limit ?? 0); if(limit===null) return;
-  const debt=prompt('Kart borcu', c.debt ?? 0); if(debt===null) return;
-  const due=prompt('Son ödeme tarihi (YYYY-AA-GG)', c.due || ''); if(due===null) return;
-  c.name=name.trim(); c.limit=Number(limit||0); c.debt=Number(debt||0); c.due=due.trim(); save();
-}
-function cardDebtPrompt(id){
-  const c=state.cards.find(x=>String(x.id)===String(id)); if(!c)return;
-  const raw=prompt('Yeni kart borcunu gir', c.debt||0); if(raw===null)return;
-  c.debt=Number(raw||0); save();
-}
-function payCardDebt(){
-  const cardId=document.getElementById('payCard').value, amount=Number(document.getElementById('payCardAmount').value||0), channel=document.getElementById('payCardChannel').value, sourceId=document.getElementById('payCardSource').value;
-  const card=state.cards.find(x=>String(x.id)===String(cardId));
-  if(!card || !amount){alert('Kart ve tutar seç.'); return;}
-  if(channel==='IBAN' && !state.banks.find(x=>String(x.id)===String(sourceId))){alert('Banka hesabı seç.'); return;}
-  card.debt=Math.max(0, Number(card.debt||0)-amount);
-  state.transactions.unshift({id:'t'+Date.now()+Math.random(), type:'gider', amount, description:'Kart borcu ödeme', category:'Kart Borcu', date:todayStr(), method:channel, sourceId, sourceType:channel, isAdvance:false});
-  document.getElementById('payCardAmount').value='';
-  save();
-}
-
-function saveTransaction(){
-  const amount=Number(document.getElementById('tutar').value||0), category=document.getElementById('kategori').value, channel=document.getElementById('kanal').value, sourceId=document.getElementById('kaynakSecim').value;
-  if(!amount){alert('Tutar gir.'); return;}
-  if(channel==='IBAN' && !state.banks.find(x=>String(x.id)===String(sourceId))){alert('Banka hesabı seç.'); return;}
-  if(channel==='Kart' && !state.cards.find(x=>String(x.id)===String(sourceId))){alert('Kart seç.'); return;}
-  const item={id:'t'+Date.now()+Math.random(), type:currentType, amount, description:document.getElementById('aciklama').value.trim(), category, date:document.getElementById('tarih').value||todayStr(), method:channel, sourceId, sourceType:channel, isAdvance:currentType==='gider'&&isAdvanceExpense(category)};
-  state.transactions.unshift(item);
-  if(item.isAdvance){
-    state.people.unshift({id:'p'+Date.now()+Math.random(), name:category.replace(' Harcamam',''), type:'alacak', amount, date:item.date, dueDate:item.date, note:'Gün içi verildi, geri alınacak', settlements:[]});
-  }
-  document.getElementById('tutar').value=''; document.getElementById('aciklama').value=''; document.getElementById('tarih').value=todayStr();
-  save(); go('home');
-}
-
-function openPersonForm(type){document.getElementById('personForm').style.display='grid'; document.getElementById('kisiTur').value=type||'alacak';}
-function savePersonRecord(){
-  const name=document.getElementById('kisiAdi').value.trim(), amount=Number(document.getElementById('kisiTutar').value||0);
-  if(!name || !amount){alert('Kişi adı ve tutar gir.'); return;}
-  state.people.unshift({id:'p'+Date.now()+Math.random(), name, type:document.getElementById('kisiTur').value, amount, date:document.getElementById('kisiTarih').value||todayStr(), dueDate:document.getElementById('kisiVade').value||'', note:document.getElementById('kisiNot').value.trim(), settlements:[]});
-  document.getElementById('kisiAdi').value=''; document.getElementById('kisiTutar').value=''; document.getElementById('kisiTarih').value=todayStr(); document.getElementById('kisiVade').value=''; document.getElementById('kisiNot').value='';
-  save();
-}
-function settlementPrompt(id){
-  const p=state.people.find(x=>String(x.id)===String(id)); if(!p)return;
-  const raw=prompt('Ödeme / tahsilat tutarı gir'); const amount=Number(raw||0); if(!amount)return;
-  p.settlements.push({id:'s'+Date.now()+Math.random(), amount, date:todayStr()}); save();
-}
-function deletePerson(id){if(!confirm('Bu kişi kaydını silmek istiyor musun?'))return; state.people=state.people.filter(x=>String(x.id)!==String(id)); save();}
-function editPerson(id){
-  const p=state.people.find(x=>String(x.id)===String(id)); if(!p)return;
-  const name=prompt('Kişi / hesap adı', p.name); if(name===null || !name.trim()) return;
-  const type=prompt('Tür: alacak veya borc', p.type); if(type===null) return;
-  const amount=prompt('Tutar', p.amount ?? 0); if(amount===null) return;
-  const date=prompt('Tarih (YYYY-AA-GG)', p.date || todayStr()); if(date===null) return;
-  const due=prompt('Vade tarihi (YYYY-AA-GG)', p.dueDate || ''); if(due===null) return;
-  const note=prompt('Not', p.note || ''); if(note===null) return;
-  p.name=name.trim(); p.type=(type==='borc'?'borc':'alacak'); p.amount=Number(amount||0); p.date=date.trim()||todayStr(); p.dueDate=due.trim(); p.note=note.trim(); save();
-}
-function deleteTransaction(id){if(!confirm('Bu işlemi silmek istiyor musun?'))return; state.transactions=state.transactions.filter(x=>String(x.id)!==String(id)); save();}
-function editTransaction(id){
-  const t=state.transactions.find(x=>String(x.id)===String(id)); if(!t)return;
-  const type=prompt('Tür: gelir veya gider', t.type); if(type===null) return;
-  const amount=prompt('Tutar', t.amount ?? 0); if(amount===null) return;
-  const description=prompt('Açıklama', t.description || ''); if(description===null) return;
-  const category=prompt('Kategori', t.category || ''); if(category===null) return;
-  const date=prompt('Tarih (YYYY-AA-GG)', t.date || todayStr()); if(date===null) return;
-  const method=prompt('Kanal: Nakit / IBAN / Kart', t.method || 'Nakit'); if(method===null) return;
-  let normalizedMethod='Nakit';
-  if(method.toLowerCase()==='iban') normalizedMethod='IBAN';
-  else if(method.toLowerCase()==='kart') normalizedMethod='Kart';
-  let sourceId='cash';
-  if(normalizedMethod==='IBAN'){
-    if(!state.banks.length){alert('Önce banka hesabı eklemelisin.'); return;}
-    const bankNames=state.banks.map(x=>x.name).join(', ');
-    const chosen=prompt('Banka adı seç. Mevcut: '+bankNames, (state.banks.find(x=>String(x.id)===String(t.sourceId))||state.banks[0]).name);
-    if(chosen===null) return;
-    const bank=state.banks.find(x=>x.name.toLowerCase()===chosen.trim().toLowerCase());
-    if(!bank){alert('Banka bulunamadı. Adı tam yaz.'); return;}
-    sourceId=bank.id;
-  }
-  if(normalizedMethod==='Kart'){
-    if(!state.cards.length){alert('Önce kart eklemelisin.'); return;}
-    const cardNames=state.cards.map(x=>x.name).join(', ');
-    const chosen=prompt('Kart adı seç. Mevcut: '+cardNames, (state.cards.find(x=>String(x.id)===String(t.sourceId))||state.cards[0]).name);
-    if(chosen===null) return;
-    const card=state.cards.find(x=>x.name.toLowerCase()===chosen.trim().toLowerCase());
-    if(!card){alert('Kart bulunamadı. Adı tam yaz.'); return;}
-    sourceId=card.id;
-  }
-  t.type=(type==='gider'?'gider':'gelir');
-  t.amount=Number(amount||0);
-  t.description=description.trim();
-  t.category=category.trim();
-  t.date=date.trim()||todayStr();
-  t.method=normalizedMethod;
-  t.sourceType=normalizedMethod;
-  t.sourceId=sourceId;
-  t.isAdvance=t.type==='gider' && isAdvanceExpense(t.category);
-  save();
-}
-function deleteClosing(id){if(!confirm('Bu kapanış kaydını silmek istiyor musun?'))return; state.closings=state.closings.filter(x=>String(x.id)!==String(id)); save();}
-
-function calcBalances(){
-  let cash=Number(state.cashInitial||0);
-  const banks={}; state.banks.forEach(b=>banks[b.id]=Number(b.balance||0));
-  const cards={}; state.cards.forEach(c=>cards[c.id]=Number(c.debt||0));
-  for(const t of state.transactions.slice().reverse()){
-    const amt=Number(t.amount||0);
-    if(t.method==='Nakit') cash += t.type==='gelir' ? amt : -amt;
-    else if(t.method==='IBAN'){ if(banks[t.sourceId]===undefined) banks[t.sourceId]=0; banks[t.sourceId] += t.type==='gelir' ? amt : -amt; }
-    else if(t.method==='Kart'){ if(cards[t.sourceId]===undefined) cards[t.sourceId]=0; if(t.type==='gider') cards[t.sourceId]+=amt; if(t.type==='gelir') cards[t.sourceId]-=amt; }
-  }
-  return {cash,banks,cards};
-}
-
-function calc(){
-  const today=todayStr(), ym=today.slice(0,7), cats={};
-  let todayIncome=0,todayExpense=0,monthIncome=0,monthExpense=0;
-  for(const t of state.transactions){
-    const a=Number(t.amount||0);
-    if(t.type==='gelir'){ if(t.date===today) todayIncome+=a; if((t.date||'').slice(0,7)===ym) monthIncome+=a; }
-    else { if(t.date===today) todayExpense+=a; if((t.date||'').slice(0,7)===ym) monthExpense+=a; }
-    const key=(t.type==='gelir'?'Gelir: ':'Gider: ')+(t.category||'Diğer');
-    cats[key]=(cats[key]||0)+a;
-  }
-  let receivable=0,debt=0;
-  for(const p of state.people){
-    const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0), remain=Math.max(0,Number(p.amount||0)-settled);
-    if(p.type==='alacak') receivable+=remain; else debt+=remain;
-  }
-  const b=calcBalances(), bankTotal=Object.values(b.banks).reduce((a,v)=>a+Number(v||0),0), cardDebtTotal=Object.values(b.cards).reduce((a,v)=>a+Number(v||0),0);
-  return {cashOnHand:b.cash, bankBalances:b.banks, cardDebts:b.cards, bankTotal, cardDebtTotal, generalTotal:b.cash+bankTotal, todayIncome, todayExpense, receivable, debt, profitToday:todayIncome-todayExpense, profitMonth:monthIncome-monthExpense, monthIncome, monthExpense, cats};
-}
-
-function createClosing(){
-  const c=calc();
-  state.closings.unshift({id:'cl'+Date.now()+Math.random(), date:todayStr(), note:document.getElementById('closingNote').value.trim(), generalTotal:c.generalTotal, cashOnHand:c.cashOnHand, bankTotal:c.bankTotal, cardDebtTotal:c.cardDebtTotal, profitToday:c.profitToday});
-  document.getElementById('closingNote').value='';
-  save();
-  alert('Gün sonu kaydedildi.');
-}
-function runCashCount(){
-  const real=Number(document.getElementById('countedCash').value||0), systemCash=calc().cashOnHand, diff=real-systemCash;
-  let txt='Sistem nakdi: '+money(systemCash)+' | Sayılan nakit: '+money(real)+' | Fark: '+money(diff);
-  if(diff>0) txt+=' (Fazla)';
-  if(diff<0) txt+=' (Açık)';
-  if(diff===0) txt+=' (Tam eşit)';
-  document.getElementById('cashCountResult').textContent=txt;
-}
-
-function render(){
-  const c=calc();
-  document.getElementById('today').textContent=new Date().toLocaleDateString('tr-TR');
-  document.getElementById('generalTotal').textContent=money(c.generalTotal);
-  document.getElementById('cashOnHand').textContent=money(c.cashOnHand);
-  document.getElementById('bankTotal').textContent=money(c.bankTotal);
-  document.getElementById('cardDebtTotal').textContent=money(c.cardDebtTotal);
-  document.getElementById('todayIncome').textContent=money(c.todayIncome);
-  document.getElementById('todayExpense').textContent=money(c.todayExpense);
-  document.getElementById('receivableTotal').textContent=money(c.receivable);
-  document.getElementById('debtTotal').textContent=money(c.debt);
-  document.getElementById('profitToday').textContent=money(c.profitToday);
-  document.getElementById('profitMonth').textContent=money(c.profitMonth);
-  document.getElementById('monthIncome').textContent=money(c.monthIncome);
-  document.getElementById('monthExpense').textContent=money(c.monthExpense);
-  document.getElementById('cashInitial').value=Number(state.cashInitial||0);
-
-  const transactionList=document.getElementById('transactionList'); transactionList.innerHTML='';
-  if(!state.transactions.length) transactionList.innerHTML='<div class="empty">Henüz gelir / gider işlemi yok.</div>';
-  state.transactions.slice(0,30).forEach(t=>{
-    const div=document.createElement('div'); div.className='item';
-    const color=t.type==='gelir'?'green':'red';
-    const sourceName=t.method==='IBAN' ? ((state.banks.find(x=>String(x.id)===String(t.sourceId))||{}).name||'Banka') : t.method==='Kart' ? ((state.cards.find(x=>String(x.id)===String(t.sourceId))||{}).name||'Kart') : 'Nakit Kasa';
-    div.innerHTML=`<div class="row"><div><div class="title">${t.description||t.category||'İşlem'}</div><div class="sub">${fmtDate(t.date)} • ${t.type==='gelir'?'Gelir':'Gider'} • ${t.category||'Kategori yok'} • ${t.method} / ${sourceName}</div></div><div class="${color} title">${money(t.amount)}</div></div><div class="right" style="margin-top:10px"><button onclick="editTransaction('${t.id}')">Düzenle</button><button class="danger" onclick="deleteTransaction('${t.id}')">Sil</button></div>`;
-    transactionList.appendChild(div);
-  });
-
-  const bankList=document.getElementById('bankList'); bankList.innerHTML='';
-  if(!state.banks.length) bankList.innerHTML='<div class="empty">Henüz banka hesabı yok.</div>';
-  state.banks.forEach(b=>{
-    const bal=Number(c.bankBalances[b.id] ?? b.balance ?? 0);
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${b.name}</div><div class="sub">Güncel bakiye</div></div><div class="yellow title">${money(bal)}</div></div><div class="right" style="margin-top:10px"><button onclick="editBank('${b.id}')">Düzenle</button><button class="danger" onclick="deleteBank('${b.id}')">Sil</button></div>`;
-    bankList.appendChild(div);
-  });
-
-  const cardList=document.getElementById('cardList'); cardList.innerHTML='';
-  if(!state.cards.length) cardList.innerHTML='<div class="empty">Henüz kredi kartı yok.</div>';
-  state.cards.forEach(ca=>{
-    const debt=Number(c.cardDebts[ca.id] ?? ca.debt ?? 0), avail=Number(ca.limit||0)-debt;
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${ca.name}</div><div class="sub">Limit ${money(ca.limit)} • Son ödeme ${ca.due?fmtDate(ca.due):'yok'}</div></div><div class="orange title">${money(debt)}</div></div><div class="hint">Kullanılabilir limit: ${money(avail)}</div><div class="right" style="margin-top:10px"><button onclick="editCard('${ca.id}')">Düzenle</button><button onclick="cardDebtPrompt('${ca.id}')">Borcu Güncelle</button><button class="danger" onclick="deleteCard('${ca.id}')">Sil</button></div>`;
-    cardList.appendChild(div);
-  });
-
-  const peopleList=document.getElementById('peopleList'); peopleList.innerHTML='';
-  if(!state.people.length) peopleList.innerHTML='<div class="empty">Henüz kişi kaydı yok.</div>';
-  state.people.forEach(p=>{
-    const settled=(p.settlements||[]).reduce((a,b)=>a+Number(b.amount||0),0), remain=Math.max(0,Number(p.amount)-settled), due=p.dueDate?(' • Vade '+fmtDate(p.dueDate)):'';
-    const hist=(p.settlements||[]).slice().reverse().map(s=>`<div class="sub">• ${fmtDate(s.date)} ${money(s.amount)} işlem</div>`).join('');
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${p.name}</div><div class="sub">${p.type==='alacak'?'Bana borçlu':'Ben borçluyum'} • ${fmtDate(p.date)}${due}${p.note?(' • '+p.note):''}</div></div><div class="${p.type==='alacak'?'green':'red'} title">${money(remain)}</div></div><div class="hint">İlk tutar: ${money(p.amount)} • Kalan: ${money(remain)}</div>${hist}<div class="right" style="margin-top:10px"><button onclick="editPerson('${p.id}')">Düzenle</button><button onclick="settlementPrompt('${p.id}')">Ödeme/Tahsilat</button><button class="danger" onclick="deletePerson('${p.id}')">Sil</button></div>`;
-    peopleList.appendChild(div);
-  });
-
-  const categorySummary=document.getElementById('categorySummary'); categorySummary.innerHTML='';
-  const totalExpense=Math.max(1, Object.entries(c.cats).filter(([k])=>k.startsWith('Gider:')).reduce((a,[,v])=>a+Number(v||0),0));
-  const entries=Object.entries(c.cats).sort((a,b)=>b[1]-a[1]);
-  if(!entries.length) categorySummary.innerHTML='<div class="empty">Henüz özet yok.</div>';
-  entries.forEach(([k,v])=>{
-    const pct=k.startsWith('Gider:') ? Math.round((Number(v||0)/totalExpense)*100) : null;
-    const bar=pct!==null?`<div class="bar" style="margin-top:8px"><div class="fill" style="width:${pct}%"></div></div><div class="sub">%${pct}</div>`:'';
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div class="title">${k}</div><div class="title">${money(v)}</div></div>${bar}`;
-    categorySummary.appendChild(div);
-  });
-
-  const reminderList=document.getElementById('reminderList'); reminderList.innerHTML='';
-  const now=new Date(), reminders=[];
-  state.people.forEach(p=>{
-    if(!p.dueDate) return;
-    const d=new Date(p.dueDate+'T00:00:00'), diff=Math.ceil((d-now)/(1000*60*60*24));
-    if(diff<=7) reminders.push({text:p.name+' için '+(p.type==='alacak'?'alacak':'borç')+' vadesi '+fmtDate(p.dueDate), diff});
-  });
-  state.cards.forEach(ca=>{
-    if(!ca.due) return;
-    const d=new Date(ca.due+'T00:00:00'), diff=Math.ceil((d-now)/(1000*60*60*24));
-    if(diff<=7) reminders.push({text:ca.name+' kartının son ödeme tarihi '+fmtDate(ca.due), diff});
-  });
-  reminders.sort((a,b)=>a.diff-b.diff);
-  if(!reminders.length) reminderList.innerHTML='<div class="empty">Yaklaşan hatırlatma yok.</div>';
-  reminders.forEach(r=>{
-    const warn=r.diff<0?'Gecikti':(r.diff===0?'Bugün':r.diff+' gün kaldı');
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${r.text}</div><div class="sub">${warn}</div></div><div class="pill">${warn}</div></div>`;
-    reminderList.appendChild(div);
-  });
-
-  const closingList=document.getElementById('closingList'); closingList.innerHTML='';
-  if(!state.closings.length) closingList.innerHTML='<div class="empty">Henüz kapanış yok.</div>';
-  state.closings.forEach(cl=>{
-    const div=document.createElement('div'); div.className='item';
-    div.innerHTML=`<div class="row"><div><div class="title">${fmtDate(cl.date)}</div><div class="sub">${cl.note||'Not yok'}</div></div><div class="blue title">${money(cl.generalTotal)}</div></div><div class="sub">Nakit ${money(cl.cashOnHand)} • Banka ${money(cl.bankTotal)} • Kart Borcu ${money(cl.cardDebtTotal)} • Günlük Kar ${money(cl.profitToday)}</div><div class="right" style="margin-top:10px"><button class="danger" onclick="deleteClosing('${cl.id}')">Sil</button></div>`;
-    closingList.appendChild(div);
-  });
-
-  rebuildSourceOptions(); rebuildPaymentSourceOptions(); rebuildCardOptions();
-}
-
-function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='hesap_takip_yedek.json'; a.click();}
-function restoreData(ev){const file=ev.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=function(){try{state=Object.assign(clone(DEFAULTS), JSON.parse(reader.result)); save(); alert('Yedek geri yüklendi.');}catch(e){alert('Geçersiz yedek dosyası.');}}; reader.readAsText(file);}
-function setPin(){const v=document.getElementById('newPin').value.trim(); if(v.length<4){alert('En az 4 haneli şifre gir.'); return;} state.settings.pin=v; save(); document.getElementById('newPin').value=''; alert('Şifre kaydedildi.');}
-function clearPin(){state.settings.pin=''; save(); alert('Şifre kaldırıldı.');}
-function maybeShowPin(){const pin=(state.settings&&state.settings.pin)||''; if(!pin)return; document.getElementById('pinOverlay').classList.remove('hidden'); isLocked=true;}
-function submitPin(){const v=document.getElementById('pinInput').value; if(v===state.settings.pin){document.getElementById('pinOverlay').classList.add('hidden'); document.getElementById('pinInput').value=''; isLocked=false;} else {alert('Şifre yanlış.');}}
-function skipPin(){document.getElementById('pinOverlay').classList.add('hidden'); isLocked=false;}
-
-document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden && state.settings && state.settings.pin){
-    document.getElementById('pinOverlay').classList.remove('hidden');
-    isLocked=true;
-  }
-});
-
-document.getElementById('tarih').value=todayStr();
-document.getElementById('kisiTarih').value=todayStr();
-rebuildCategoryOptions();
-render();
-maybeShowPin();
-</script>
 </body>
 </html>
