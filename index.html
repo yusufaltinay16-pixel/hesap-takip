@@ -3,85 +3,308 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hesap Takip Pro (Bulut)</title>
+<title>Hesap Takip Pro Bulutlu</title>
+<style>
+:root{--bg:#0b0b0f;--card:#16181d;--line:#2a2d34;--text:#f5f7fb;--muted:#a7afbd;--green:#19c37d;--red:#ef4444;--blue:#4f8cff;--yellow:#eab308;--orange:#fb923c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:16px 16px 96px}h1{margin:0 0 6px;font-size:30px}.muted{color:var(--muted);font-size:14px}
+.status{margin:12px 0 18px;padding:12px 14px;border-radius:14px;background:#111318;border:1px solid var(--line);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px}
+.label{color:var(--muted);font-size:13px}.value{font-size:26px;font-weight:800;margin-top:8px}.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)} .y{color:var(--yellow)} .o{color:var(--orange)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.tab{padding:12px 14px;border:none;border-radius:999px;background:#111318;color:#fff}.tab.active{background:#243049}
+.section{display:none}.section.active{display:block}.form{display:grid;gap:12px}.inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+input,select,button{width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:#111318;color:#fff;font-size:16px}
+button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:#39181b}.primary{background:#232a35}
+.list{display:flex;flex-direction:column;gap:10px;margin-top:12px}.item{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.title{font-weight:700}.sub{font-size:13px;color:var(--muted);margin-top:4px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button{width:auto}
+.hint{font-size:12px;color:var(--muted)}.empty{padding:24px;text-align:center;color:var(--muted)}
+.bottom{position:fixed;left:0;right:0;bottom:0;background:rgba(11,11,15,.94);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:10px}.bottom button{padding:10px 8px;font-size:12px}
+@media (max-width:720px){.grid,.inline{grid-template-columns:1fr 1fr}.value{font-size:22px}}
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1>Hesap Takip Pro Bulutlu</h1>
+<div class="muted">Gelir, gider, banka, kart, borç ve alacak kayıtları bulutta saklanır</div>
+<div id="status" class="status">Başlatılıyor...</div>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+<div class="grid">
+<div class="card"><div class="label">Genel Kasa</div><div id="genelKasa" class="value b">₺0,00</div></div>
+<div class="card"><div class="label">Nakit Toplam</div><div id="nakitToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Banka Toplam</div><div id="bankaToplam" class="value y">₺0,00</div></div>
+<div class="card"><div class="label">Kart Borcu Toplam</div><div id="kartToplam" class="value o">₺0,00</div></div>
+<div class="card"><div class="label">Toplam Alacak</div><div id="alacakToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Toplam Borç</div><div id="borcToplam" class="value r">₺0,00</div></div>
+</div>
 
+<div class="tabs">
+<button class="tab active" onclick="showTab('islemler', this)">İşlemler</button>
+<button class="tab" onclick="showTab('bankalar', this)">Banka</button>
+<button class="tab" onclick="showTab('kartlar', this)">Kart</button>
+<button class="tab" onclick="showTab('kisiler', this)">Borç / Alacak</button>
+<button class="tab" onclick="showTab('kayitlar', this)">Kayıtlar</button>
+</div>
+
+<div id="islemler" class="section active">
+  <div class="card">
+    <div class="form">
+      <div class="inline">
+        <select id="islemTip"><option value="gelir">Gelir</option><option value="gider">Gider</option></select>
+        <select id="odemeYontemi" onchange="yenileKaynakSecimi()"><option value="nakit">Nakit</option><option value="banka">IBAN / Banka</option><option value="kart">Kart</option></select>
+      </div>
+      <select id="kaynakSecim"></select>
+      <input id="islemTutar" type="number" step="0.01" placeholder="Tutar">
+      <div class="inline">
+        <input id="islemKategori" placeholder="Kategori">
+        <input id="islemTarih" type="date">
+      </div>
+      <input id="islemAciklama" placeholder="Açıklama">
+      <button class="ok" id="islemKaydetBtn">İşlem Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<div id="bankalar" class="section">
+  <div class="card">
+    <div class="form">
+      <input id="bankaAd" placeholder="Banka adı">
+      <input id="bankaBakiye" type="number" step="0.01" placeholder="Başlangıç bakiye">
+      <button class="ok" id="bankaKaydetBtn">Banka Hesabı Kaydet</button>
+    </div>
+  </div>
+  <div id="bankaListe" class="list"></div>
+</div>
+
+<div id="kartlar" class="section">
+  <div class="card">
+    <div class="form">
+      <input id="kartAd" placeholder="Kart adı">
+      <div class="inline">
+        <input id="kartLimit" type="number" step="0.01" placeholder="Limit">
+        <input id="kartBorc" type="number" step="0.01" placeholder="Borç">
+      </div>
+      <button class="ok" id="kartKaydetBtn">Kart Kaydet</button>
+    </div>
+  </div>
+  <div id="kartListe" class="list"></div>
+</div>
+
+<div id="kisiler" class="section">
+  <div class="card">
+    <div class="form">
+      <input id="kisiAd" placeholder="Kişi / hesap adı">
+      <div class="inline">
+        <select id="kisiTip"><option value="alacak">Alacak</option><option value="borc">Borç</option></select>
+        <input id="kisiTutar" type="number" step="0.01" placeholder="Tutar">
+      </div>
+      <input id="kisiNot" placeholder="Not">
+      <button class="ok" id="kisiKaydetBtn">Borç / Alacak Kaydet</button>
+    </div>
+  </div>
+  <div id="kisiListe" class="list"></div>
+</div>
+
+<div id="kayitlar" class="section">
+  <div class="card">
+    <div class="hint">Tüm işlemler burada. Düzenleme ve silme buradan yapılır.</div>
+    <div id="islemListe" class="list"></div>
+  </div>
+</div>
+</div>
+
+<div class="bottom">
+<button onclick="showTabById('islemler')">İşlem</button>
+<button onclick="showTabById('bankalar')">Banka</button>
+<button onclick="showTabById('kartlar')">Kart</button>
+<button onclick="showTabById('kisiler')">Borç</button>
+<button onclick="showTabById('kayitlar')">Kayıt</button>
+</div>
+
+<script>
 const firebaseConfig = {
   apiKey: "AIzaSyBIFfk3-r8GE34GQ764qDEiDZ79org75XE",
   authDomain: "hesap-takip-2ec1e.firebaseapp.com",
   projectId: "hesap-takip-2ec1e",
+  storageBucket: "hesap-takip-2ec1e.firebasestorage.app",
+  messagingSenderId: "966376614229",
+  appId: "1:966376614229:web:200a063ff1f774e55667dc",
+  measurementId: "G-M29HV6BR36"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+let db=null, bankalar=[], kartlar=[], kisiler=[], islemler=[];
+function durum(msg){ document.getElementById("status").textContent = msg; }
+function para(n){ n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+document.getElementById("islemTarih").value=todayStr();
 
-window.addData = async function(type){
-  const amount = document.getElementById("amount").value;
-  const note = document.getElementById("note").value;
+function showTab(id, btn){
+  document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  if(btn) btn.classList.add("active");
+}
+function showTabById(id){
+  document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+function yenileKaynakSecimi(){
+  const yontem=document.getElementById("odemeYontemi").value;
+  const sel=document.getElementById("kaynakSecim");
+  let html="";
+  if(yontem==="nakit") html='<option value="nakit_kasa">Nakit Kasa</option>';
+  else if(yontem==="banka") html=bankalar.length===0?'<option value="">Önce banka hesabı ekle</option>':bankalar.map(b=>'<option value="'+b.id+'">'+b.ad+'</option>').join("");
+  else if(yontem==="kart") html=kartlar.length===0?'<option value="">Önce kart ekle</option>':kartlar.map(k=>'<option value="'+k.id+'">'+k.ad+'</option>').join("");
+  sel.innerHTML=html;
+}
+function hesapla(){
+  bankalar.forEach(b=>delete b.__calc); kartlar.forEach(k=>delete k.__calc);
+  let nakit=0, alacak=0, borc=0;
+  kisiler.forEach(k=>{ if(k.tip==="alacak") alacak+=Number(k.tutar||0); else borc+=Number(k.tutar||0); });
+  islemler.forEach(i=>{
+    const t=Number(i.tutar||0);
+    if(i.yontem==="nakit") nakit += i.tip==="gelir" ? t : -t;
+    else if(i.yontem==="banka"){ const b=bankalar.find(x=>x.id===i.kaynak); if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) + (i.tip==="gelir" ? t : -t); }
+    else if(i.yontem==="kart"){ const k=kartlar.find(x=>x.id===i.kaynak); if(k) k.__calc=(k.__calc ?? Number(k.borc||0)) + (i.tip==="gider" ? t : -t); }
+  });
+  let bankaToplam=0; bankalar.forEach(b=>bankaToplam += Number(b.__calc ?? b.bakiye ?? 0));
+  let kartToplam=0; kartlar.forEach(k=>kartToplam += Number(k.__calc ?? k.borc ?? 0));
+  return {nakit,bankaToplam,kartToplam,alacak,borc,genel:nakit+bankaToplam};
+}
+function render(){
+  const o=hesapla();
+  document.getElementById("genelKasa").textContent=para(o.genel);
+  document.getElementById("nakitToplam").textContent=para(o.nakit);
+  document.getElementById("bankaToplam").textContent=para(o.bankaToplam);
+  document.getElementById("kartToplam").textContent=para(o.kartToplam);
+  document.getElementById("alacakToplam").textContent=para(o.alacak);
+  document.getElementById("borcToplam").textContent=para(o.borc);
 
-  if(!amount) return alert("Tutar gir");
-
-  await addDoc(collection(db, "transactions"), {
-    type,
-    amount: Number(amount),
-    note,
-    date: new Date()
+  const bankaListe=document.getElementById("bankaListe");
+  bankaListe.innerHTML=bankalar.length?"":'<div class="empty">Henüz banka hesabı yok.</div>';
+  bankalar.forEach(b=>{
+    bankaListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${b.ad}</div><div class="sub">Güncel bakiye</div></div><div class="title y">${para(b.__calc ?? b.bakiye ?? 0)}</div></div><div class="actions"><button class="primary" onclick="bankaDuzenle('${b.id}')">Düzenle</button><button class="danger" onclick="bankaSil('${b.id}')">Sil</button></div></div>`;
   });
 
-  alert("Kaydedildi");
-  loadData();
-}
-
-window.loadData = async function(){
-  const list = document.getElementById("list");
-  list.innerHTML = "";
-
-  const querySnapshot = await getDocs(collection(db, "transactions"));
-
-  querySnapshot.forEach((docSnap)=>{
-    const d = docSnap.data();
-
-    const div = document.createElement("div");
-    div.innerHTML = `
-      ${d.type} - ₺${d.amount} 
-      <button onclick="sil('${docSnap.id}')">Sil</button>
-    `;
-    list.appendChild(div);
+  const kartListe=document.getElementById("kartListe");
+  kartListe.innerHTML=kartlar.length?"":'<div class="empty">Henüz kart yok.</div>';
+  kartlar.forEach(k=>{
+    kartListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${k.ad}</div><div class="sub">Limit ${para(k.limit)}</div></div><div class="title o">${para(k.__calc ?? k.borc ?? 0)}</div></div><div class="actions"><button class="primary" onclick="kartDuzenle('${k.id}')">Düzenle</button><button class="danger" onclick="kartSil('${k.id}')">Sil</button></div></div>`;
   });
+
+  const kisiListe=document.getElementById("kisiListe");
+  kisiListe.innerHTML=kisiler.length?"":'<div class="empty">Henüz borç / alacak yok.</div>';
+  kisiler.forEach(k=>{
+    kisiListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${k.ad}</div><div class="sub">${k.tip==="alacak"?"Alacak":"Borç"} ${k.not?("• "+k.not):""}</div></div><div class="title ${k.tip==="alacak"?"g":"r"}">${para(k.tutar)}</div></div><div class="actions"><button class="primary" onclick="kisiDuzenle('${k.id}')">Düzenle</button><button class="danger" onclick="kisiSil('${k.id}')">Sil</button></div></div>`;
+  });
+
+  const islemListe=document.getElementById("islemListe");
+  islemListe.innerHTML=islemler.length?"":'<div class="empty">Henüz işlem yok.</div>';
+  islemler.forEach(i=>{
+    const kaynakText = i.yontem==="nakit" ? "Nakit Kasa" : i.yontem==="banka" ? (((bankalar.find(x=>x.id===i.kaynak))||{}).ad || "Banka") : (((kartlar.find(x=>x.id===i.kaynak))||{}).ad || "Kart");
+    islemListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${i.aciklama || i.kategori || "İşlem"}</div><div class="sub">${i.tarih} • ${i.tip} • ${i.yontem} • ${kaynakText}</div></div><div class="title ${i.tip==="gelir"?"g":"r"}">${i.tip==="gelir"?"+":"-"} ${para(i.tutar)}</div></div><div class="actions"><button class="primary" onclick="islemDuzenle('${i.id}')">Düzenle</button><button class="danger" onclick="islemSil('${i.id}')">Sil</button></div></div>`;
+  });
+
+  yenileKaynakSecimi();
 }
 
-window.sil = async function(id){
-  await deleteDoc(doc(db, "transactions", id));
-  loadData();
+async function tumVerileriYukle(){
+  if(!db) return;
+  try{
+    durum("Veriler yükleniyor...");
+    const results = await Promise.all([
+      db.collection("bankalar").get(),
+      db.collection("kartlar").get(),
+      db.collection("kisiler").get(),
+      db.collection("islemler").get()
+    ]);
+    bankalar = results[0].docs.map(d => ({id:d.id, ...d.data()}));
+    kartlar = results[1].docs.map(d => ({id:d.id, ...d.data()}));
+    kisiler = results[2].docs.map(d => ({id:d.id, ...d.data()}));
+    islemler = results[3].docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+    render();
+    durum("Hazır");
+  }catch(e){
+    durum("Yükleme hatası: " + e.message);
+    alert("Yükleme hatası: " + e.message);
+  }
 }
 
-window.onload = loadData;
+async function bankaKaydet(){
+  const ad=document.getElementById("bankaAd").value.trim();
+  const bakiye=Number(document.getElementById("bankaBakiye").value||0);
+  if(!ad){ alert("Banka adı gir."); return; }
+  try{ await db.collection("bankalar").add({ad,bakiye,createdAt:new Date().toISOString()}); document.getElementById("bankaAd").value=""; document.getElementById("bankaBakiye").value=""; tumVerileriYukle(); }catch(e){ alert("Banka kayıt hatası: "+e.message); }
+}
+async function kartKaydet(){
+  const ad=document.getElementById("kartAd").value.trim();
+  const limit=Number(document.getElementById("kartLimit").value||0);
+  const borc=Number(document.getElementById("kartBorc").value||0);
+  if(!ad){ alert("Kart adı gir."); return; }
+  try{ await db.collection("kartlar").add({ad,limit,borc,createdAt:new Date().toISOString()}); document.getElementById("kartAd").value=""; document.getElementById("kartLimit").value=""; document.getElementById("kartBorc").value=""; tumVerileriYukle(); }catch(e){ alert("Kart kayıt hatası: "+e.message); }
+}
+async function kisiKaydet(){
+  const ad=document.getElementById("kisiAd").value.trim();
+  const tip=document.getElementById("kisiTip").value;
+  const tutar=Number(document.getElementById("kisiTutar").value||0);
+  const not=document.getElementById("kisiNot").value.trim();
+  if(!ad || !tutar){ alert("Kişi adı ve tutar gir."); return; }
+  try{ await db.collection("kisiler").add({ad,tip,tutar,not,createdAt:new Date().toISOString()}); document.getElementById("kisiAd").value=""; document.getElementById("kisiTutar").value=""; document.getElementById("kisiNot").value=""; tumVerileriYukle(); }catch(e){ alert("Kişi kayıt hatası: "+e.message); }
+}
+async function islemKaydet(){
+  const tip=document.getElementById("islemTip").value;
+  const yontem=document.getElementById("odemeYontemi").value;
+  const kaynak=document.getElementById("kaynakSecim").value;
+  const tutar=Number(document.getElementById("islemTutar").value||0);
+  const kategori=document.getElementById("islemKategori").value.trim();
+  const tarih=document.getElementById("islemTarih").value||todayStr();
+  const aciklama=document.getElementById("islemAciklama").value.trim();
+  if(!tutar){ alert("Tutar gir."); return; }
+  if((yontem==="banka" || yontem==="kart") && !kaynak){ alert("Hesap seç."); return; }
+  try{ await db.collection("islemler").add({tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()}); document.getElementById("islemTutar").value=""; document.getElementById("islemKategori").value=""; document.getElementById("islemAciklama").value=""; tumVerileriYukle(); }catch(e){ alert("İşlem kayıt hatası: "+e.message); }
+}
+
+async function bankaSil(id){ if(!confirm("Banka hesabı silinsin mi?")) return; try{ await db.collection("bankalar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function kartSil(id){ if(!confirm("Kart silinsin mi?")) return; try{ await db.collection("kartlar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function kisiSil(id){ if(!confirm("Kayıt silinsin mi?")) return; try{ await db.collection("kisiler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function islemSil(id){ if(!confirm("İşlem silinsin mi?")) return; try{ await db.collection("islemler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+
+async function bankaDuzenle(id){ const x=bankalar.find(v=>v.id===id); if(!x) return; const ad=prompt("Yeni banka adı",x.ad); if(ad===null) return; const bakiye=prompt("Yeni başlangıç bakiye",x.bakiye); if(bakiye===null) return; await db.collection("bankalar").doc(id).update({ad,bakiye:Number(bakiye||0)}); tumVerileriYukle(); }
+async function kartDuzenle(id){ const x=kartlar.find(v=>v.id===id); if(!x) return; const ad=prompt("Yeni kart adı",x.ad); if(ad===null) return; const limit=prompt("Yeni limit",x.limit); if(limit===null) return; const borc=prompt("Yeni borç",x.borc); if(borc===null) return; await db.collection("kartlar").doc(id).update({ad,limit:Number(limit||0),borc:Number(borc||0)}); tumVerileriYukle(); }
+async function kisiDuzenle(id){ const x=kisiler.find(v=>v.id===id); if(!x) return; const ad=prompt("Yeni kişi adı",x.ad); if(ad===null) return; const tutar=prompt("Yeni tutar",x.tutar); if(tutar===null) return; const not=prompt("Yeni not",x.not||""); if(not===null) return; await db.collection("kisiler").doc(id).update({ad,tutar:Number(tutar||0),not}); tumVerileriYukle(); }
+async function islemDuzenle(id){ const x=islemler.find(v=>v.id===id); if(!x) return; const tutar=prompt("Yeni tutar",x.tutar); if(tutar===null) return; const kategori=prompt("Yeni kategori",x.kategori||""); if(kategori===null) return; const aciklama=prompt("Yeni açıklama",x.aciklama||""); if(aciklama===null) return; await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori,aciklama}); tumVerileriYukle(); }
+
+function initButtons(){
+  document.getElementById("bankaKaydetBtn").addEventListener("click", bankaKaydet);
+  document.getElementById("kartKaydetBtn").addEventListener("click", kartKaydet);
+  document.getElementById("kisiKaydetBtn").addEventListener("click", kisiKaydet);
+  document.getElementById("islemKaydetBtn").addEventListener("click", islemKaydet);
+}
+
+window.showTab=showTab;
+window.showTabById=showTabById;
+window.yenileKaynakSecimi=yenileKaynakSecimi;
+window.bankaDuzenle=bankaDuzenle;
+window.bankaSil=bankaSil;
+window.kartDuzenle=kartDuzenle;
+window.kartSil=kartSil;
+window.kisiDuzenle=kisiDuzenle;
+window.kisiSil=kisiSil;
+window.islemDuzenle=islemDuzenle;
+window.islemSil=islemSil;
+
+try{
+  if(!window.firebase) throw new Error("Firebase script yüklenemedi");
+  if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  db=firebase.firestore();
+  initButtons();
+  durum("Firebase bağlandı");
+  tumVerileriYukle();
+}catch(e){
+  durum("Başlatma hatası: " + e.message);
+  alert("Başlatma hatası: " + e.message);
+}
 </script>
-
-<style>
-body{background:#111;color:white;font-family:Arial;padding:20px}
-input{padding:10px;margin:5px}
-button{padding:10px;margin:5px}
-</style>
-
-</head>
-<body>
-
-<h2>Hesap Takip (Bulutlu)</h2>
-
-<input id="amount" placeholder="Tutar">
-<input id="note" placeholder="Açıklama">
-
-<br>
-
-<button onclick="addData('Gelir')">Gelir Ekle</button>
-<button onclick="addData('Gider')">Gider Ekle</button>
-
-<h3>Kayıtlar</h3>
-<div id="list"></div>
-
 </body>
 </html>
