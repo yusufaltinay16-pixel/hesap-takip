@@ -41,6 +41,13 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
 <div class="card"><div class="label">Kart Borcu Toplam</div><div id="kartToplam" class="value o">₺0,00</div></div>
 <div class="card"><div class="label">Toplam Alacak</div><div id="alacakToplam" class="value g">₺0,00</div></div>
 <div class="card"><div class="label">Toplam Borç</div><div id="borcToplam" class="value r">₺0,00</div></div>
+<div class="card"><div class="label">Şahsi Harcama Toplam</div><div id="sahsiToplam" class="value r">₺0,00</div></div>
+<div class="card"><div class="label">Eve Harcama Toplam</div><div id="evToplam" class="value r">₺0,00</div></div>
+<div class="card"><div class="label">Babama Verilen</div><div id="babamaToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Şelale Gıda Verilen</div><div id="selaleGidaToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Şelale Foto Verilen</div><div id="selaleFotoToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Atölye Verilen</div><div id="atolyeToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Diğer Verilen</div><div id="digerToplam" class="value g">₺0,00</div></div>
 </div>
 
 <div class="card" style="margin-top:12px">
@@ -75,6 +82,7 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
           <option value="Şelale Foto Harcama">Şelale Foto Harcama</option>
           <option value="Atölye Harcama">Atölye Harcama</option>
           <option value="Diğer Harcamalar">Diğer Harcamalar</option>
+          <option value="Genel">Genel</option>
         </select>
         <input id="islemTarih" type="date">
       </div>
@@ -153,69 +161,33 @@ const firebaseConfig = {
 };
 
 let db=null, bankalar=[], kartlar=[], kisiler=[], islemler=[];
-
-const OTOMATIK_KATEGORI_HARITASI = {
-  "Şahsi Harcama": { tip: "borc", kisiAdi: "Şahsi Harcama" },
-  "Eve Harcama": { tip: "borc", kisiAdi: "Eve Harcama" },
-  "Babama Harcama": { tip: "alacak", kisiAdi: "Babama Harcama" },
-  "Şelale Gıda Harcama": { tip: "alacak", kisiAdi: "Şelale Gıda Harcama" },
-  "Şelale Foto Harcama": { tip: "alacak", kisiAdi: "Şelale Foto Harcama" },
-  "Atölye Harcama": { tip: "alacak", kisiAdi: "Atölye Harcama" },
-  "Diğer Harcamalar": { tip: "alacak", kisiAdi: "Diğer Harcamalar" }
-};
-
-function kategoriKuraliGetir(kategori){
-  return OTOMATIK_KATEGORI_HARITASI[String(kategori||"").trim()] || null;
-}
-
-async function otomatikKisiHareketiUygula(islem, carpim){
-  if(!db || !islem) return;
-  if(String(islem.tip||"") !== "gider") return;
-  const kural = kategoriKuraliGetir(islem.kategori);
-  if(!kural) return;
-
-  const degisim = Number(islem.tutar || 0) * Number(carpim || 1);
-  if(!degisim) return;
-
-  const snap = await db.collection("kisiler")
-    .where("ad", "==", kural.kisiAdi)
-    .where("tip", "==", kural.tip)
-    .where("otomatikTakip", "==", true)
-    .limit(1)
-    .get();
-
-  if(snap.empty){
-    if(degisim <= 0) return;
-    await db.collection("kisiler").add({
-      ad: kural.kisiAdi,
-      tip: kural.tip,
-      tutar: degisim,
-      not: "Otomatik harcama takibi",
-      otomatikTakip: true,
-      kategoriKaynak: islem.kategori,
-      createdAt: new Date().toISOString()
-    });
-    return;
-  }
-
-  const doc = snap.docs[0];
-  const veri = doc.data() || {};
-  const yeniTutar = Number(veri.tutar || 0) + degisim;
-  if(yeniTutar <= 0){
-    await db.collection("kisiler").doc(doc.id).delete();
-  }else{
-    await db.collection("kisiler").doc(doc.id).update({
-      tutar: yeniTutar,
-      updatedAt: new Date().toISOString()
-    });
-  }
-}
+const OZEL_HARCAMA_KATEGORILERI = ["Şahsi Harcama","Eve Harcama","Babama Harcama","Şelale Gıda Harcama","Şelale Foto Harcama","Atölye Harcama","Diğer Harcamalar"];
 function durum(msg){ document.getElementById("status").textContent = msg; }
 function para(n){ n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function trDate(s){ if(!s) return "Tarih yok"; const p=s.split("-"); return p[2]+"."+p[1]+"."+p[0]; }
+function normalizeCategory(s){ return String(s||"").trim().toLocaleLowerCase('tr-TR'); }
+function isSahsiKategori(s){ return normalizeCategory(s)==='şahsi harcama'; }
+function isEvKategori(s){ return normalizeCategory(s)==='eve harcama'; }
+function ozelAlacakAdi(kategori){
+  const k = normalizeCategory(kategori);
+  if(k==='babama harcama') return 'Babama Verilen';
+  if(k==='şelale gıda harcama') return 'Şelale Gıda Verilen';
+  if(k==='şelale foto harcama') return 'Şelale Foto Verilen';
+  if(k==='atölye harcama') return 'Atölye Verilen';
+  if(k==='diğer harcamalar') return 'Diğer Verilen';
+  return '';
+}
 document.getElementById("islemTarih").value=todayStr();
 document.getElementById("kartOdemeTarihi").value=todayStr();
+
+function kategoriAlaniniAyarla(){
+  const tip = document.getElementById('islemTip').value;
+  const kat = document.getElementById('islemKategori');
+  kat.disabled = tip !== 'gider';
+  kat.style.opacity = tip === 'gider' ? '1' : '0.6';
+  if(tip !== 'gider') kat.value = '';
+}
 
 function showTab(id, btn){
   document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
@@ -239,16 +211,33 @@ function yenileKaynakSecimi(){
 function hesapla(){
   bankalar.forEach(b=>delete b.__calc); kartlar.forEach(k=>delete k.__calc);
   let nakit=0, alacak=0, borc=0;
+  let sahsiToplam=0, evToplam=0, babamaToplam=0, selaleGidaToplam=0, selaleFotoToplam=0, atolyeToplam=0, digerToplam=0;
   kisiler.forEach(k=>{ if(k.tip==="alacak") alacak+=Number(k.tutar||0); else borc+=Number(k.tutar||0); });
   islemler.forEach(i=>{
     const t=Number(i.tutar||0);
     if(i.yontem==="nakit") nakit += i.tip==="gelir" ? t : -t;
     else if(i.yontem==="banka"){ const b=bankalar.find(x=>x.id===i.kaynak); if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) + (i.tip==="gelir" ? t : -t); }
     else if(i.yontem==="kart"){ const k=kartlar.find(x=>x.id===i.kaynak); if(k) k.__calc=(k.__calc ?? Number(k.borc||0)) + (i.tip==="gider" ? t : -t); }
+
+    if(i.tip === 'gider'){
+      if(isSahsiKategori(i.kategori)) sahsiToplam += t;
+      else if(isEvKategori(i.kategori)) evToplam += t;
+      else {
+        const alacakAdi = ozelAlacakAdi(i.kategori);
+        if(alacakAdi){
+          alacak += t;
+          if(alacakAdi==='Babama Verilen') babamaToplam += t;
+          else if(alacakAdi==='Şelale Gıda Verilen') selaleGidaToplam += t;
+          else if(alacakAdi==='Şelale Foto Verilen') selaleFotoToplam += t;
+          else if(alacakAdi==='Atölye Verilen') atolyeToplam += t;
+          else if(alacakAdi==='Diğer Verilen') digerToplam += t;
+        }
+      }
+    }
   });
   let bankaToplam=0; bankalar.forEach(b=>bankaToplam += Number(b.__calc ?? b.bakiye ?? 0));
   let kartToplam=0; kartlar.forEach(k=>kartToplam += Number(k.__calc ?? k.borc ?? 0));
-  return {nakit,bankaToplam,kartToplam,alacak,borc,genel:nakit+bankaToplam};
+  return {nakit,bankaToplam,kartToplam,alacak,borc,genel:nakit+bankaToplam,sahsiToplam,evToplam,babamaToplam,selaleGidaToplam,selaleFotoToplam,atolyeToplam,digerToplam};
 }
 function renderOdemeTarihleri(){
   const box=document.getElementById("odemeTarihListe");
@@ -270,6 +259,13 @@ function render(){
   document.getElementById("kartToplam").textContent=para(o.kartToplam);
   document.getElementById("alacakToplam").textContent=para(o.alacak);
   document.getElementById("borcToplam").textContent=para(o.borc);
+  document.getElementById("sahsiToplam").textContent=para(o.sahsiToplam);
+  document.getElementById("evToplam").textContent=para(o.evToplam);
+  document.getElementById("babamaToplam").textContent=para(o.babamaToplam);
+  document.getElementById("selaleGidaToplam").textContent=para(o.selaleGidaToplam);
+  document.getElementById("selaleFotoToplam").textContent=para(o.selaleFotoToplam);
+  document.getElementById("atolyeToplam").textContent=para(o.atolyeToplam);
+  document.getElementById("digerToplam").textContent=para(o.digerToplam);
 
   const bankaListe=document.getElementById("bankaListe");
   bankaListe.innerHTML=bankalar.length?"":'<div class="empty">Henüz banka hesabı yok.</div>';
@@ -345,6 +341,14 @@ async function kartKaydet(){
     document.getElementById("kartLimit").value="";
     document.getElementById("kartBorc").value="";
     document.getElementById("kartOdemeTarihi").value=todayStr();
+
+function kategoriAlaniniAyarla(){
+  const tip = document.getElementById('islemTip').value;
+  const kat = document.getElementById('islemKategori');
+  kat.disabled = tip !== 'gider';
+  kat.style.opacity = tip === 'gider' ? '1' : '0.6';
+  if(tip !== 'gider') kat.value = '';
+}
     tumVerileriYukle();
   }catch(e){ alert("Kart kayıt hatası: "+e.message); }
 }
@@ -371,12 +375,10 @@ async function islemKaydet(){
   const tarih=document.getElementById("islemTarih").value||todayStr();
   const aciklama=document.getElementById("islemAciklama").value.trim();
   if(!tutar){ alert("Tutar gir."); return; }
-  if(!kategori){ alert("Kategori seç."); return; }
   if((yontem==="banka" || yontem==="kart") && !kaynak){ alert("Hesap seç."); return; }
+  if(tip==='gider' && !kategori){ alert("Gider için kategori seç."); return; }
   try{
-    const yeniIslem={tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()};
-    await db.collection("islemler").add(yeniIslem);
-    await otomatikKisiHareketiUygula(yeniIslem, 1);
+    await db.collection("islemler").add({tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()});
     document.getElementById("islemTutar").value="";
     document.getElementById("islemKategori").value="";
     document.getElementById("islemAciklama").value="";
@@ -387,15 +389,7 @@ async function islemKaydet(){
 async function bankaSil(id){ if(!confirm("Banka hesabı silinsin mi?")) return; try{ await db.collection("bankalar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kartSil(id){ if(!confirm("Kart silinsin mi?")) return; try{ await db.collection("kartlar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kisiSil(id){ if(!confirm("Kayıt silinsin mi?")) return; try{ await db.collection("kisiler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
-async function islemSil(id){
-  if(!confirm("İşlem silinsin mi?")) return;
-  try{
-    const x=islemler.find(v=>v.id===id);
-    if(x) await otomatikKisiHareketiUygula(x, -1);
-    await db.collection("islemler").doc(id).delete();
-    tumVerileriYukle();
-  }catch(e){ alert(e.message); }
-}
+async function islemSil(id){ if(!confirm("İşlem silinsin mi?")) return; try{ await db.collection("islemler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 
 async function bankaDuzenle(id){
   const x=bankalar.find(v=>v.id===id); if(!x) return;
@@ -424,13 +418,20 @@ async function kisiDuzenle(id){
 async function islemDuzenle(id){
   const x=islemler.find(v=>v.id===id); if(!x) return;
   const tutar=prompt("Yeni tutar",x.tutar); if(tutar===null) return;
-  const kategoriSecenekleri = Object.keys(OTOMATIK_KATEGORI_HARITASI).join(" | ");
-  const kategori=prompt("Yeni kategori\n"+kategoriSecenekleri, x.kategori||""); if(kategori===null) return;
+  let kategori = x.kategori||"";
+  if(x.tip==='gider'){
+    const secenekler = OZEL_HARCAMA_KATEGORILERI.concat(['Genel']);
+    const mesaj = `Yeni kategori\n\nSeçenekler:\n- ${secenekler.join('\n- ')}`;
+    const yeniKategori=prompt(mesaj,kategori);
+    if(yeniKategori===null) return;
+    kategori=yeniKategori.trim();
+  } else {
+    const yeniKategori=prompt("Yeni kategori",kategori);
+    if(yeniKategori===null) return;
+    kategori=yeniKategori.trim();
+  }
   const aciklama=prompt("Yeni açıklama",x.aciklama||""); if(aciklama===null) return;
-  const yeniIslem = {...x, tutar:Number(tutar||0), kategori:String(kategori||"").trim(), aciklama};
-  await otomatikKisiHareketiUygula(x, -1);
-  await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori:String(kategori||"").trim(),aciklama,updatedAt:new Date().toISOString()});
-  await otomatikKisiHareketiUygula(yeniIslem, 1);
+  await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori,aciklama});
   tumVerileriYukle();
 }
 
@@ -439,6 +440,8 @@ function initButtons(){
   document.getElementById("kartKaydetBtn").addEventListener("click", kartKaydet);
   document.getElementById("kisiKaydetBtn").addEventListener("click", kisiKaydet);
   document.getElementById("islemKaydetBtn").addEventListener("click", islemKaydet);
+  document.getElementById("islemTip").addEventListener("change", kategoriAlaniniAyarla);
+  kategoriAlaniniAyarla();
 }
 
 window.showTab=showTab;
