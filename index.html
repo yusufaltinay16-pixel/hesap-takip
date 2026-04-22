@@ -66,7 +66,16 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
       <select id="kaynakSecim"></select>
       <input id="islemTutar" type="number" step="0.01" placeholder="Tutar">
       <div class="inline">
-        <input id="islemKategori" placeholder="Kategori">
+        <select id="islemKategori">
+          <option value="">Kategori seç</option>
+          <option value="Şahsi Harcama">Şahsi Harcama</option>
+          <option value="Eve Harcama">Eve Harcama</option>
+          <option value="Babama Harcama">Babama Harcama</option>
+          <option value="Şelale Gıda Harcama">Şelale Gıda Harcama</option>
+          <option value="Şelale Foto Harcama">Şelale Foto Harcama</option>
+          <option value="Atölye Harcama">Atölye Harcama</option>
+          <option value="Diğer Harcamalar">Diğer Harcamalar</option>
+        </select>
         <input id="islemTarih" type="date">
       </div>
       <input id="islemAciklama" placeholder="Açıklama">
@@ -144,6 +153,63 @@ const firebaseConfig = {
 };
 
 let db=null, bankalar=[], kartlar=[], kisiler=[], islemler=[];
+
+const OTOMATIK_KATEGORI_HARITASI = {
+  "Şahsi Harcama": { tip: "borc", kisiAdi: "Şahsi Harcama" },
+  "Eve Harcama": { tip: "borc", kisiAdi: "Eve Harcama" },
+  "Babama Harcama": { tip: "alacak", kisiAdi: "Babama Harcama" },
+  "Şelale Gıda Harcama": { tip: "alacak", kisiAdi: "Şelale Gıda Harcama" },
+  "Şelale Foto Harcama": { tip: "alacak", kisiAdi: "Şelale Foto Harcama" },
+  "Atölye Harcama": { tip: "alacak", kisiAdi: "Atölye Harcama" },
+  "Diğer Harcamalar": { tip: "alacak", kisiAdi: "Diğer Harcamalar" }
+};
+
+function kategoriKuraliGetir(kategori){
+  return OTOMATIK_KATEGORI_HARITASI[String(kategori||"").trim()] || null;
+}
+
+async function otomatikKisiHareketiUygula(islem, carpim){
+  if(!db || !islem) return;
+  if(String(islem.tip||"") !== "gider") return;
+  const kural = kategoriKuraliGetir(islem.kategori);
+  if(!kural) return;
+
+  const degisim = Number(islem.tutar || 0) * Number(carpim || 1);
+  if(!degisim) return;
+
+  const snap = await db.collection("kisiler")
+    .where("ad", "==", kural.kisiAdi)
+    .where("tip", "==", kural.tip)
+    .where("otomatikTakip", "==", true)
+    .limit(1)
+    .get();
+
+  if(snap.empty){
+    if(degisim <= 0) return;
+    await db.collection("kisiler").add({
+      ad: kural.kisiAdi,
+      tip: kural.tip,
+      tutar: degisim,
+      not: "Otomatik harcama takibi",
+      otomatikTakip: true,
+      kategoriKaynak: islem.kategori,
+      createdAt: new Date().toISOString()
+    });
+    return;
+  }
+
+  const doc = snap.docs[0];
+  const veri = doc.data() || {};
+  const yeniTutar = Number(veri.tutar || 0) + degisim;
+  if(yeniTutar <= 0){
+    await db.collection("kisiler").doc(doc.id).delete();
+  }else{
+    await db.collection("kisiler").doc(doc.id).update({
+      tutar: yeniTutar,
+      updatedAt: new Date().toISOString()
+    });
+  }
+}
 function durum(msg){ document.getElementById("status").textContent = msg; }
 function para(n){ n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
@@ -305,9 +371,12 @@ async function islemKaydet(){
   const tarih=document.getElementById("islemTarih").value||todayStr();
   const aciklama=document.getElementById("islemAciklama").value.trim();
   if(!tutar){ alert("Tutar gir."); return; }
+  if(!kategori){ alert("Kategori seç."); return; }
   if((yontem==="banka" || yontem==="kart") && !kaynak){ alert("Hesap seç."); return; }
   try{
-    await db.collection("islemler").add({tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()});
+    const yeniIslem={tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()};
+    await db.collection("islemler").add(yeniIslem);
+    await otomatikKisiHareketiUygula(yeniIslem, 1);
     document.getElementById("islemTutar").value="";
     document.getElementById("islemKategori").value="";
     document.getElementById("islemAciklama").value="";
@@ -318,7 +387,15 @@ async function islemKaydet(){
 async function bankaSil(id){ if(!confirm("Banka hesabı silinsin mi?")) return; try{ await db.collection("bankalar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kartSil(id){ if(!confirm("Kart silinsin mi?")) return; try{ await db.collection("kartlar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kisiSil(id){ if(!confirm("Kayıt silinsin mi?")) return; try{ await db.collection("kisiler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
-async function islemSil(id){ if(!confirm("İşlem silinsin mi?")) return; try{ await db.collection("islemler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function islemSil(id){
+  if(!confirm("İşlem silinsin mi?")) return;
+  try{
+    const x=islemler.find(v=>v.id===id);
+    if(x) await otomatikKisiHareketiUygula(x, -1);
+    await db.collection("islemler").doc(id).delete();
+    tumVerileriYukle();
+  }catch(e){ alert(e.message); }
+}
 
 async function bankaDuzenle(id){
   const x=bankalar.find(v=>v.id===id); if(!x) return;
@@ -347,9 +424,13 @@ async function kisiDuzenle(id){
 async function islemDuzenle(id){
   const x=islemler.find(v=>v.id===id); if(!x) return;
   const tutar=prompt("Yeni tutar",x.tutar); if(tutar===null) return;
-  const kategori=prompt("Yeni kategori",x.kategori||""); if(kategori===null) return;
+  const kategoriSecenekleri = Object.keys(OTOMATIK_KATEGORI_HARITASI).join(" | ");
+  const kategori=prompt("Yeni kategori\n"+kategoriSecenekleri, x.kategori||""); if(kategori===null) return;
   const aciklama=prompt("Yeni açıklama",x.aciklama||""); if(aciklama===null) return;
-  await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori,aciklama});
+  const yeniIslem = {...x, tutar:Number(tutar||0), kategori:String(kategori||"").trim(), aciklama};
+  await otomatikKisiHareketiUygula(x, -1);
+  await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori:String(kategori||"").trim(),aciklama,updatedAt:new Date().toISOString()});
+  await otomatikKisiHareketiUygula(yeniIslem, 1);
   tumVerileriYukle();
 }
 
