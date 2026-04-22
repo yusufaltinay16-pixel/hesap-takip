@@ -31,7 +31,7 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
 <body>
 <div class="wrap">
 <h1>Hesap Takip Pro Bulutlu</h1>
-<div class="muted">Gelir, gider, banka, kart, borç ve alacak kayıtları bulutta saklanır</div>
+<div class="muted">Gelir, gider, banka, kart, borç ve alacak kayıtları bulutta saklanır. Şahsi/Ev harcaması sadece giderdir; diğer özel harcamalar alacak olarak takip edilir.</div>
 <div id="status" class="status">Başlatılıyor...</div>
 
 <div class="grid">
@@ -40,6 +40,7 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
 <div class="card"><div class="label">Banka Toplam</div><div id="bankaToplam" class="value y">₺0,00</div></div>
 <div class="card"><div class="label">Kart Borcu Toplam</div><div id="kartToplam" class="value o">₺0,00</div></div>
 <div class="card"><div class="label">Toplam Alacak</div><div id="alacakToplam" class="value g">₺0,00</div></div>
+<div class="card"><div class="label">Aktif Verilen Para</div><div id="aktifAlacakToplam" class="value g">₺0,00</div></div>
 <div class="card"><div class="label">Toplam Borç</div><div id="borcToplam" class="value r">₺0,00</div></div>
 <div class="card"><div class="label">Şahsi Harcama Toplam</div><div id="sahsiToplam" class="value r">₺0,00</div></div>
 <div class="card"><div class="label">Eve Harcama Toplam</div><div id="evToplam" class="value r">₺0,00</div></div>
@@ -86,7 +87,7 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
         </select>
         <input id="islemTarih" type="date">
       </div>
-      <input id="islemAciklama" placeholder="Açıklama">
+      <div class="inline"><input id="islemAciklama" placeholder="Açıklama"><input id="islemVadeTarihi" type="date" placeholder="Vade tarihi (opsiyonel)"></div>
       <button class="ok" id="islemKaydetBtn">İşlem Kaydet</button>
     </div>
   </div>
@@ -131,6 +132,12 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
     </div>
   </div>
   <div id="kisiListe" class="list"></div>
+  <div class="card" style="margin-top:12px">
+    <div class="title">Verilen Paralar / Tahsilat</div>
+    <div class="hint">Şahsi ve eve harcama buraya girmez. Babama / Şelale Gıda / Şelale Foto / Atölye / Diğer harcamalar burada kalan alacak olarak takip edilir.</div>
+    <div id="alacakOzetListe" class="list"></div>
+    <div id="alacakTakipListe" class="list"></div>
+  </div>
 </div>
 
 <div id="kayitlar" class="section">
@@ -160,7 +167,7 @@ const firebaseConfig = {
   measurementId: "G-M29HV6BR36"
 };
 
-let db=null, bankalar=[], kartlar=[], kisiler=[], islemler=[];
+let db=null, bankalar=[], kartlar=[], kisiler=[], islemler=[], alacakTakipleri=[];
 const OZEL_HARCAMA_KATEGORILERI = ["Şahsi Harcama","Eve Harcama","Babama Harcama","Şelale Gıda Harcama","Şelale Foto Harcama","Atölye Harcama","Diğer Harcamalar"];
 function durum(msg){ document.getElementById("status").textContent = msg; }
 function para(n){ n=Number(n||0); return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n); }
@@ -178,8 +185,29 @@ function ozelAlacakAdi(kategori){
   if(k==='diğer harcamalar') return 'Diğer Verilen';
   return '';
 }
+
+function tahsilKoleksiyonAdiToKategori(ad){
+  const m={
+    'Babama Verilen':'Babama Harcama',
+    'Şelale Gıda Verilen':'Şelale Gıda Harcama',
+    'Şelale Foto Verilen':'Şelale Foto Harcama',
+    'Atölye Verilen':'Atölye Harcama',
+    'Diğer Verilen':'Diğer Harcamalar'
+  };
+  return m[ad] || ad;
+}
+function tahsilDurumHesapla(kalan, toplam){
+  const k=Number(kalan||0), t=Number(toplam||0);
+  if(k<=0) return 'tahsil edildi';
+  if(k<t) return 'kısmi tahsil';
+  return 'verildi';
+}
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
 document.getElementById("islemTarih").value=todayStr();
 document.getElementById("kartOdemeTarihi").value=todayStr();
+document.getElementById("islemVadeTarihi").value="";
 
 function kategoriAlaniniAyarla(){
   const tip = document.getElementById('islemTip').value;
@@ -210,7 +238,7 @@ function yenileKaynakSecimi(){
 }
 function hesapla(){
   bankalar.forEach(b=>delete b.__calc); kartlar.forEach(k=>delete k.__calc);
-  let nakit=0, alacak=0, borc=0;
+  let nakit=0, alacak=0, borc=0, aktifAlacakToplam=0;
   let sahsiToplam=0, evToplam=0, babamaToplam=0, selaleGidaToplam=0, selaleFotoToplam=0, atolyeToplam=0, digerToplam=0;
   kisiler.forEach(k=>{ if(k.tip==="alacak") alacak+=Number(k.tutar||0); else borc+=Number(k.tutar||0); });
   islemler.forEach(i=>{
@@ -222,22 +250,21 @@ function hesapla(){
     if(i.tip === 'gider'){
       if(isSahsiKategori(i.kategori)) sahsiToplam += t;
       else if(isEvKategori(i.kategori)) evToplam += t;
-      else {
-        const alacakAdi = ozelAlacakAdi(i.kategori);
-        if(alacakAdi){
-          alacak += t;
-          if(alacakAdi==='Babama Verilen') babamaToplam += t;
-          else if(alacakAdi==='Şelale Gıda Verilen') selaleGidaToplam += t;
-          else if(alacakAdi==='Şelale Foto Verilen') selaleFotoToplam += t;
-          else if(alacakAdi==='Atölye Verilen') atolyeToplam += t;
-          else if(alacakAdi==='Diğer Verilen') digerToplam += t;
-        }
-      }
     }
+  });
+
+  alacakTakipleri.forEach(a=>{
+    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
+    const durum=tahsilDurumHesapla(kalan,toplam);
+    const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
+    const buttons = kalan>0
+      ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
+      : '<span class="pill">Kapandı</span>';
+    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
   });
   let bankaToplam=0; bankalar.forEach(b=>bankaToplam += Number(b.__calc ?? b.bakiye ?? 0));
   let kartToplam=0; kartlar.forEach(k=>kartToplam += Number(k.__calc ?? k.borc ?? 0));
-  return {nakit,bankaToplam,kartToplam,alacak,borc,genel:nakit+bankaToplam,sahsiToplam,evToplam,babamaToplam,selaleGidaToplam,selaleFotoToplam,atolyeToplam,digerToplam};
+  return {nakit,bankaToplam,kartToplam,alacak,borc,aktifAlacakToplam,genel:nakit+bankaToplam,sahsiToplam,evToplam,babamaToplam,selaleGidaToplam,selaleFotoToplam,atolyeToplam,digerToplam};
 }
 function renderOdemeTarihleri(){
   const box=document.getElementById("odemeTarihListe");
@@ -258,6 +285,7 @@ function render(){
   document.getElementById("bankaToplam").textContent=para(o.bankaToplam);
   document.getElementById("kartToplam").textContent=para(o.kartToplam);
   document.getElementById("alacakToplam").textContent=para(o.alacak);
+  document.getElementById("aktifAlacakToplam").textContent=para(o.aktifAlacakToplam);
   document.getElementById("borcToplam").textContent=para(o.borc);
   document.getElementById("sahsiToplam").textContent=para(o.sahsiToplam);
   document.getElementById("evToplam").textContent=para(o.evToplam);
@@ -285,6 +313,31 @@ function render(){
     kisiListe.innerHTML += '<div class="item"><div class="row"><div><div class="title">'+k.ad+'</div><div class="sub">'+(k.tip==="alacak"?"Alacak":"Borç")+' '+(k.not?("• "+k.not):"")+'</div></div><div class="title '+(k.tip==="alacak"?"g":"r")+'">'+para(k.tutar)+'</div></div><div class="actions"><button class="primary" onclick="kisiDuzenle(\''+k.id+'\')">Düzenle</button><button class="danger" onclick="kisiSil(\''+k.id+'\')">Sil</button></div></div>';
   });
 
+
+  const alacakOzetListe=document.getElementById("alacakOzetListe");
+  const grupMap={};
+  alacakTakipleri.forEach(a=>{
+    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
+    const durum=tahsilDurumHesapla(kalan,toplam);
+    const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
+    const buttons = kalan>0
+      ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
+      : '<span class="pill">Kapandı</span>';
+    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
+  });
+
+  const alacakTakipListe=document.getElementById("alacakTakipListe");
+  alacakTakipListe.innerHTML=alacakTakipleri.length?"":'<div class="empty">Takip edilen verilen para yok.</div>';
+  alacakTakipleri.forEach(a=>{
+    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
+    const durum=tahsilDurumHesapla(kalan,toplam);
+    const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
+    const buttons = kalan>0
+      ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
+      : '<span class="pill">Kapandı</span>';
+    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
+  });
+
   const islemListe=document.getElementById("islemListe");
   islemListe.innerHTML=islemler.length?"":'<div class="empty">Henüz işlem yok.</div>';
   islemler.forEach(i=>{
@@ -304,12 +357,14 @@ async function tumVerileriYukle(){
       db.collection("bankalar").get(),
       db.collection("kartlar").get(),
       db.collection("kisiler").get(),
-      db.collection("islemler").get()
+      db.collection("islemler").get(),
+      db.collection("alacak_takipleri").get()
     ]);
     bankalar = results[0].docs.map(d => ({id:d.id, ...d.data()}));
     kartlar = results[1].docs.map(d => ({id:d.id, ...d.data()}));
     kisiler = results[2].docs.map(d => ({id:d.id, ...d.data()}));
     islemler = results[3].docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+    alacakTakipleri = results[4].docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
     render();
     durum("Hazır");
   }catch(e){
@@ -341,14 +396,8 @@ async function kartKaydet(){
     document.getElementById("kartLimit").value="";
     document.getElementById("kartBorc").value="";
     document.getElementById("kartOdemeTarihi").value=todayStr();
+document.getElementById("islemVadeTarihi").value="";
 
-function kategoriAlaniniAyarla(){
-  const tip = document.getElementById('islemTip').value;
-  const kat = document.getElementById('islemKategori');
-  kat.disabled = tip !== 'gider';
-  kat.style.opacity = tip === 'gider' ? '1' : '0.6';
-  if(tip !== 'gider') kat.value = '';
-}
     tumVerileriYukle();
   }catch(e){ alert("Kart kayıt hatası: "+e.message); }
 }
@@ -374,14 +423,27 @@ async function islemKaydet(){
   const kategori=document.getElementById("islemKategori").value.trim();
   const tarih=document.getElementById("islemTarih").value||todayStr();
   const aciklama=document.getElementById("islemAciklama").value.trim();
+  const vadeTarihi=document.getElementById("islemVadeTarihi").value||"";
   if(!tutar){ alert("Tutar gir."); return; }
   if((yontem==="banka" || yontem==="kart") && !kaynak){ alert("Hesap seç."); return; }
   if(tip==='gider' && !kategori){ alert("Gider için kategori seç."); return; }
   try{
-    await db.collection("islemler").add({tip,yontem,kaynak,tutar,kategori,tarih,aciklama,createdAt:new Date().toISOString()});
+    const islemRef = await db.collection("islemler").add({tip,yontem,kaynak,tutar,kategori,tarih,aciklama,vadeTarihi,createdAt:new Date().toISOString()});
+    const alacakAdi = tip==='gider' ? ozelAlacakAdi(kategori) : '';
+    if(alacakAdi){
+      await db.collection("alacak_takipleri").add({
+        ad: alacakAdi,
+        kaynakKategori: kategori,
+        islemId: islemRef.id,
+        tutar, kalan:tutar,
+        tarih, vadeTarihi, aciklama,
+        createdAt:new Date().toISOString()
+      });
+    }
     document.getElementById("islemTutar").value="";
     document.getElementById("islemKategori").value="";
     document.getElementById("islemAciklama").value="";
+    document.getElementById("islemVadeTarihi").value="";
     tumVerileriYukle();
   }catch(e){ alert("İşlem kayıt hatası: "+e.message); }
 }
@@ -389,7 +451,15 @@ async function islemKaydet(){
 async function bankaSil(id){ if(!confirm("Banka hesabı silinsin mi?")) return; try{ await db.collection("bankalar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kartSil(id){ if(!confirm("Kart silinsin mi?")) return; try{ await db.collection("kartlar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kisiSil(id){ if(!confirm("Kayıt silinsin mi?")) return; try{ await db.collection("kisiler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
-async function islemSil(id){ if(!confirm("İşlem silinsin mi?")) return; try{ await db.collection("islemler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function islemSil(id){
+  if(!confirm("İşlem silinsin mi?")) return;
+  try{
+    const linked = alacakTakipleri.filter(x=>x.islemId===id);
+    for(const a of linked){ await db.collection("alacak_takipleri").doc(a.id).delete(); }
+    await db.collection("islemler").doc(id).delete();
+    tumVerileriYukle();
+  }catch(e){ alert(e.message); }
+}
 
 async function bankaDuzenle(id){
   const x=bankalar.find(v=>v.id===id); if(!x) return;
@@ -431,8 +501,81 @@ async function islemDuzenle(id){
     kategori=yeniKategori.trim();
   }
   const aciklama=prompt("Yeni açıklama",x.aciklama||""); if(aciklama===null) return;
-  await db.collection("islemler").doc(id).update({tutar:Number(tutar||0),kategori,aciklama});
+  const vadeTarihi=prompt("Yeni vade tarihi (YYYY-AA-GG, boş olabilir)",x.vadeTarihi||""); if(vadeTarihi===null) return;
+  const yeniTutar=Number(tutar||0);
+  await db.collection("islemler").doc(id).update({tutar:yeniTutar,kategori,aciklama,vadeTarihi});
+  const linked = alacakTakipleri.find(a=>a.islemId===id);
+  const yeniAlacakAdi = x.tip==='gider' ? ozelAlacakAdi(kategori) : '';
+  if(linked && !yeniAlacakAdi){
+    await db.collection("alacak_takipleri").doc(linked.id).delete();
+  } else if(!linked && yeniAlacakAdi){
+    await db.collection("alacak_takipleri").add({ad:yeniAlacakAdi,kaynakKategori:kategori,islemId:id,tutar:yeniTutar,kalan:yeniTutar,tarih:x.tarih||todayStr(),vadeTarihi,aciklama,createdAt:new Date().toISOString()});
+  } else if(linked && yeniAlacakAdi){
+    const eskiTahsil=Number(linked.tutar||0)-Number(linked.kalan||0);
+    const yeniKalan=Math.max(0,yeniTutar-eskiTahsil);
+    await db.collection("alacak_takipleri").doc(linked.id).update({ad:yeniAlacakAdi,kaynakKategori:kategori,tutar:yeniTutar,kalan:yeniKalan,vadeTarihi,aciklama});
+  }
   tumVerileriYukle();
+}
+
+async function alacakTahsilEt(id){
+  const x=alacakTakipleri.find(v=>v.id===id); if(!x) return;
+  return alacakTahsilIslemi(x, Number(x.kalan||0));
+}
+async function alacakKismiTahsilEt(id){
+  const x=alacakTakipleri.find(v=>v.id===id); if(!x) return;
+  const miktar=prompt('Tahsil edilecek tutar', x.kalan||0);
+  if(miktar===null) return;
+  const tutar=Number(miktar||0);
+  if(!tutar || tutar<=0){ alert('Geçerli tutar gir.'); return; }
+  if(tutar>Number(x.kalan||0)){ alert('Kalan alacaktan büyük olamaz.'); return; }
+  return alacakTahsilIslemi(x, tutar);
+}
+async function alacakTahsilIslemi(x, tahsilTutar){
+  const yontem=prompt('Tahsil yöntemi yaz: nakit / banka / kart','nakit');
+  if(yontem===null) return;
+  const method=String(yontem||'nakit').trim().toLowerCase();
+  let kaynak='nakit_kasa';
+  if(method==='banka'){
+    if(!bankalar.length){ alert('Önce banka hesabı ekle.'); return; }
+    const secenek=bankalar.map((b,i)=>`${i+1}- ${b.ad}`).join('\n');
+    const secim=prompt('Banka seç:\n'+secenek,'1');
+    if(secim===null) return;
+    const idx=Number(secim)-1;
+    if(!bankalar[idx]){ alert('Geçersiz banka seçimi.'); return; }
+    kaynak=bankalar[idx].id;
+  } else if(method==='kart'){
+    if(!kartlar.length){ alert('Önce kart ekle.'); return; }
+    const secenek=kartlar.map((k,i)=>`${i+1}- ${k.ad}`).join('\n');
+    const secim=prompt('Kart seç:\n'+secenek,'1');
+    if(secim===null) return;
+    const idx=Number(secim)-1;
+    if(!kartlar[idx]){ alert('Geçersiz kart seçimi.'); return; }
+    kaynak=kartlar[idx].id;
+  } else if(method!=='nakit'){
+    alert('Sadece nakit, banka veya kart yaz.');
+    return;
+  }
+  try{
+    await db.collection('islemler').add({
+      tip:'gelir', yontem:method, kaynak, tutar:Number(tahsilTutar), kategori:'Tahsilat',
+      tarih:todayStr(), aciklama:`${x.ad} tahsilat`, createdAt:new Date().toISOString()
+    });
+    const yeniKalan=Math.max(0, Number(x.kalan||0)-Number(tahsilTutar));
+    await db.collection('alacak_takipleri').doc(x.id).update({
+      kalan:yeniKalan,
+      sonTahsilatTarihi:todayStr(),
+      durum:tahsilDurumHesapla(yeniKalan, Number(x.tutar||0))
+    });
+    tumVerileriYukle();
+  }catch(e){ alert('Tahsilat hatası: '+e.message); }
+}
+async function alacakTakipSil(id){
+  if(!confirm('Bu verilen para takibi silinsin mi?')) return;
+  try{
+    await db.collection('alacak_takipleri').doc(id).delete();
+    tumVerileriYukle();
+  }catch(e){ alert(e.message); }
 }
 
 function initButtons(){
@@ -455,6 +598,9 @@ window.kisiDuzenle=kisiDuzenle;
 window.kisiSil=kisiSil;
 window.islemDuzenle=islemDuzenle;
 window.islemSil=islemSil;
+window.alacakTahsilEt=alacakTahsilEt;
+window.alacakKismiTahsilEt=alacakKismiTahsilEt;
+window.alacakTakipSil=alacakTakipSil;
 
 try{
   if(!window.firebase) throw new Error("Firebase script yüklenemedi");
