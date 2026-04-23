@@ -185,7 +185,20 @@ function ozelAlacakAdi(kategori){
   if(k==='diğer harcamalar') return 'Diğer Verilen';
   return '';
 }
-
+function takipKaydiAdi(a){
+  return String(a.ad || ozelAlacakAdi(a.kaynakKategori || '') || '').trim();
+}
+function takipKaydiGrupAdi(a){
+  const ad = takipKaydiAdi(a);
+  const k = normalizeCategory(a.kaynakKategori || '');
+  if(ad) return ad;
+  if(k==='babama harcama') return 'Babama Verilen';
+  if(k==='şelale gıda harcama') return 'Şelale Gıda Verilen';
+  if(k==='şelale foto harcama') return 'Şelale Foto Verilen';
+  if(k==='atölye harcama') return 'Atölye Verilen';
+  if(k==='diğer harcamalar') return 'Diğer Verilen';
+  return '';
+}
 function tahsilKoleksiyonAdiToKategori(ad){
   const m={
     'Babama Verilen':'Babama Harcama',
@@ -240,12 +253,20 @@ function hesapla(){
   bankalar.forEach(b=>delete b.__calc); kartlar.forEach(k=>delete k.__calc);
   let nakit=0, alacak=0, borc=0, aktifAlacakToplam=0;
   let sahsiToplam=0, evToplam=0, babamaToplam=0, selaleGidaToplam=0, selaleFotoToplam=0, atolyeToplam=0, digerToplam=0;
+
   kisiler.forEach(k=>{ if(k.tip==="alacak") alacak+=Number(k.tutar||0); else borc+=Number(k.tutar||0); });
+
   islemler.forEach(i=>{
     const t=Number(i.tutar||0);
     if(i.yontem==="nakit") nakit += i.tip==="gelir" ? t : -t;
-    else if(i.yontem==="banka"){ const b=bankalar.find(x=>x.id===i.kaynak); if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) + (i.tip==="gelir" ? t : -t); }
-    else if(i.yontem==="kart"){ const k=kartlar.find(x=>x.id===i.kaynak); if(k) k.__calc=(k.__calc ?? Number(k.borc||0)) + (i.tip==="gider" ? t : -t); }
+    else if(i.yontem==="banka"){
+      const b=bankalar.find(x=>x.id===i.kaynak);
+      if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) + (i.tip==="gelir" ? t : -t);
+    }
+    else if(i.yontem==="kart"){
+      const k=kartlar.find(x=>x.id===i.kaynak);
+      if(k) k.__calc=(k.__calc ?? Number(k.borc||0)) + (i.tip==="gider" ? t : -t);
+    }
 
     if(i.tip === 'gider'){
       if(isSahsiKategori(i.kategori)) sahsiToplam += t;
@@ -254,14 +275,17 @@ function hesapla(){
   });
 
   alacakTakipleri.forEach(a=>{
-    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
-    const durum=tahsilDurumHesapla(kalan,toplam);
-    const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
-    const buttons = kalan>0
-      ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
-      : '<span class="pill">Kapandı</span>';
-    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
+    const kalan = Math.max(0, Number(a.kalan ?? a.tutar ?? 0));
+    const grupAdi = takipKaydiGrupAdi(a);
+    if(!grupAdi) return;
+    aktifAlacakToplam += kalan;
+    if(grupAdi==='Babama Verilen') babamaToplam += kalan;
+    else if(grupAdi==='Şelale Gıda Verilen') selaleGidaToplam += kalan;
+    else if(grupAdi==='Şelale Foto Verilen') selaleFotoToplam += kalan;
+    else if(grupAdi==='Atölye Verilen') atolyeToplam += kalan;
+    else if(grupAdi==='Diğer Verilen') digerToplam += kalan;
   });
+
   let bankaToplam=0; bankalar.forEach(b=>bankaToplam += Number(b.__calc ?? b.bakiye ?? 0));
   let kartToplam=0; kartlar.forEach(k=>kartToplam += Number(k.__calc ?? k.borc ?? 0));
   return {nakit,bankaToplam,kartToplam,alacak,borc,aktifAlacakToplam,genel:nakit+bankaToplam,sahsiToplam,evToplam,babamaToplam,selaleGidaToplam,selaleFotoToplam,atolyeToplam,digerToplam};
@@ -319,10 +343,11 @@ function render(){
   const grupMap={};
 
   alacakTakipleri.forEach(a=>{
-    const ad=String(a.ad||'');
+    const ad=takipKaydiGrupAdi(a);
+    if(!ad) return;
     const toplam=Number(a.tutar||0);
-    const kalan=Number(a.kalan||0);
-    const tahsil=toplam-kalan;
+    const kalan=Math.max(0, Number(a.kalan ?? a.tutar ?? 0));
+    const tahsil=Number(a.tahsilEdilen ?? (toplam-kalan));
     if(!grupMap[ad]) grupMap[ad]={toplam:0,tahsil:0,kalan:0};
     grupMap[ad].toplam += toplam;
     grupMap[ad].tahsil += tahsil;
@@ -348,13 +373,16 @@ function render(){
 
   alacakTakipListe.innerHTML=alacakTakipleri.length?"":'<div class="empty">Takip edilen verilen para yok.</div>';
   alacakTakipleri.forEach(a=>{
-    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
+    const ad=takipKaydiGrupAdi(a);
+    const toplam=Number(a.tutar||0);
+    const kalan=Math.max(0, Number(a.kalan ?? a.tutar ?? 0));
+    const tahsil=Number(a.tahsilEdilen ?? (toplam-kalan));
     const durum=tahsilDurumHesapla(kalan,toplam);
     const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
     const buttons = kalan>0
       ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
       : '<span class="pill">Kapandı</span>';
-    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
+    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(ad || a.ad || 'Verilen Para')}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
   });
   const islemListe=document.getElementById("islemListe");
   islemListe.innerHTML=islemler.length?"":'<div class="empty">Henüz işlem yok.</div>';
@@ -453,7 +481,9 @@ async function islemKaydet(){
         ad: alacakAdi,
         kaynakKategori: kategori,
         islemId: islemRef.id,
-        tutar, kalan:tutar,
+        tutar,
+        kalan:tutar,
+        tahsilEdilen:0,
         tarih, vadeTarihi, aciklama,
         createdAt:new Date().toISOString()
       });
@@ -527,11 +557,11 @@ async function islemDuzenle(id){
   if(linked && !yeniAlacakAdi){
     await db.collection("alacak_takipleri").doc(linked.id).delete();
   } else if(!linked && yeniAlacakAdi){
-    await db.collection("alacak_takipleri").add({ad:yeniAlacakAdi,kaynakKategori:kategori,islemId:id,tutar:yeniTutar,kalan:yeniTutar,tarih:x.tarih||todayStr(),vadeTarihi,aciklama,createdAt:new Date().toISOString()});
+    await db.collection("alacak_takipleri").add({ad:yeniAlacakAdi,kaynakKategori:kategori,islemId:id,tutar:yeniTutar,kalan:yeniTutar,tahsilEdilen:0,tarih:x.tarih||todayStr(),vadeTarihi,aciklama,createdAt:new Date().toISOString()});
   } else if(linked && yeniAlacakAdi){
-    const eskiTahsil=Number(linked.tutar||0)-Number(linked.kalan||0);
+    const eskiTahsil=Number(linked.tahsilEdilen ?? ((linked.tutar||0)-(linked.kalan||0)));
     const yeniKalan=Math.max(0,yeniTutar-eskiTahsil);
-    await db.collection("alacak_takipleri").doc(linked.id).update({ad:yeniAlacakAdi,kaynakKategori:kategori,tutar:yeniTutar,kalan:yeniKalan,vadeTarihi,aciklama});
+    await db.collection("alacak_takipleri").doc(linked.id).update({ad:yeniAlacakAdi,kaynakKategori:kategori,tutar:yeniTutar,kalan:yeniKalan,tahsilEdilen:Math.min(eskiTahsil,yeniTutar),vadeTarihi,aciklama,durum:tahsilDurumHesapla(yeniKalan,yeniTutar)});
   }
   tumVerileriYukle();
 }
@@ -579,9 +609,12 @@ async function alacakTahsilIslemi(x, tahsilTutar){
       tip:'gelir', yontem:method, kaynak, tutar:Number(tahsilTutar), kategori:'Tahsilat',
       tarih:todayStr(), aciklama:`${x.ad} tahsilat`, createdAt:new Date().toISOString()
     });
-    const yeniKalan=Math.max(0, Number(x.kalan||0)-Number(tahsilTutar));
+    const oncekiTahsil=Number(x.tahsilEdilen ?? ((x.tutar||0)-(x.kalan||0)));
+    const yeniTahsilEdilen=oncekiTahsil + Number(tahsilTutar);
+    const yeniKalan=Math.max(0, Number(x.tutar||0)-yeniTahsilEdilen);
     await db.collection('alacak_takipleri').doc(x.id).update({
       kalan:yeniKalan,
+      tahsilEdilen:yeniTahsilEdilen,
       sonTahsilatTarihi:todayStr(),
       durum:tahsilDurumHesapla(yeniKalan, Number(x.tutar||0))
     });
