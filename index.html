@@ -315,18 +315,37 @@ function render(){
 
 
   const alacakOzetListe=document.getElementById("alacakOzetListe");
+  const alacakTakipListe=document.getElementById("alacakTakipListe");
   const grupMap={};
+
   alacakTakipleri.forEach(a=>{
-    const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
-    const durum=tahsilDurumHesapla(kalan,toplam);
-    const tarihBilgi = trDate(a.tarih||'')+(a.vadeTarihi?(' • Vade: '+trDate(a.vadeTarihi)):'')+(a.aciklama?(' • '+escapeHtml(a.aciklama)):'');
-    const buttons = kalan>0
-      ? `<button class="ok" onclick="alacakTahsilEt('${a.id}')">Tahsil Et</button><button class="primary" onclick="alacakKismiTahsilEt('${a.id}')">Kısmi Tahsil</button>`
-      : '<span class="pill">Kapandı</span>';
-    alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
+    const ad=String(a.ad||'');
+    const toplam=Number(a.tutar||0);
+    const kalan=Number(a.kalan||0);
+    const tahsil=toplam-kalan;
+    if(!grupMap[ad]) grupMap[ad]={toplam:0,tahsil:0,kalan:0};
+    grupMap[ad].toplam += toplam;
+    grupMap[ad].tahsil += tahsil;
+    grupMap[ad].kalan += kalan;
   });
 
-  const alacakTakipListe=document.getElementById("alacakTakipListe");
+  const ozetAdlari = [
+    'Babama Verilen',
+    'Şelale Gıda Verilen',
+    'Şelale Foto Verilen',
+    'Atölye Verilen',
+    'Diğer Verilen'
+  ];
+  alacakOzetListe.innerHTML='';
+  const ozetKartlari=[];
+  ozetAdlari.forEach(ad=>{
+    const g=grupMap[ad] || {toplam:0,tahsil:0,kalan:0};
+    if(g.toplam>0){
+      ozetKartlari.push(`<div class="item"><div class="row"><div><div class="title">${escapeHtml(ad)}</div><div class="sub">Toplam verilen: ${para(g.toplam)} • Tahsil edilen: ${para(g.tahsil)}</div></div><div class="title g">${para(g.kalan)}</div></div></div>`);
+    }
+  });
+  alacakOzetListe.innerHTML = ozetKartlari.length ? ozetKartlari.join('') : '<div class="empty">Henüz verilen para özeti yok.</div>';
+
   alacakTakipListe.innerHTML=alacakTakipleri.length?"":'<div class="empty">Takip edilen verilen para yok.</div>';
   alacakTakipleri.forEach(a=>{
     const toplam=Number(a.tutar||0), kalan=Number(a.kalan||0), tahsil=toplam-kalan;
@@ -337,7 +356,6 @@ function render(){
       : '<span class="pill">Kapandı</span>';
     alacakTakipListe.innerHTML += `<div class="item"><div class="row"><div><div class="title">${escapeHtml(a.ad)}</div><div class="sub">${tarihBilgi}</div></div><div class="title g">${para(kalan)}</div></div><div class="sub">Toplam verilen: ${para(toplam)} • Tahsil edilen: ${para(tahsil)} • Durum: ${durum}</div><div class="actions">${buttons}<button class="danger" onclick="alacakTakipSil('${a.id}')">Sil</button></div></div>`;
   });
-
   const islemListe=document.getElementById("islemListe");
   islemListe.innerHTML=islemler.length?"":'<div class="empty">Henüz işlem yok.</div>';
   islemler.forEach(i=>{
