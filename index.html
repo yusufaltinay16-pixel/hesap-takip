@@ -124,10 +124,15 @@ button{cursor:pointer;font-weight:700}.ok{background:#133023}.danger{background:
     <div class="form">
       <input id="kisiAd" placeholder="Kişi / hesap adı">
       <div class="inline">
-        <select id="kisiTip"><option value="alacak">Alacak</option><option value="borc">Borç</option></select>
+        <select id="kisiTip"><option value="alacak">Alacak / Borç Verdim</option><option value="borc">Borç Aldım</option></select>
         <input id="kisiTutar" type="number" step="0.01" placeholder="Tutar">
       </div>
+      <div class="inline">
+        <select id="kisiYontem" onchange="yenileKisiKaynakSecimi()"><option value="nakit">Nakit</option><option value="banka">IBAN / Banka</option><option value="kart">Kart</option></select>
+        <select id="kisiKaynakSecim"></select>
+      </div>
       <input id="kisiNot" placeholder="Not">
+      <div class="hint">Alacak/Borç verdim seçilirse seçilen kasadan düşer. Borç aldım seçilirse seçilen kasaya eklenir. Kart seçilirse borç verdim kart borcunu artırır, borç aldım kart borcunu düşürür.</div>
       <button class="ok" id="kisiKaydetBtn">Borç / Alacak Kaydet</button>
     </div>
   </div>
@@ -249,14 +254,24 @@ function yenileKaynakSecimi(){
   else if(yontem==="kart") html=kartlar.length===0?'<option value="">Önce kart ekle</option>':kartlar.map(k=>'<option value="'+k.id+'">'+k.ad+'</option>').join("");
   sel.innerHTML=html;
 }
+
+function yenileKisiKaynakSecimi(){
+  const yontem=document.getElementById("kisiYontem").value;
+  const sel=document.getElementById("kisiKaynakSecim");
+  let html="";
+  if(yontem==="nakit") html='<option value="nakit_kasa">Nakit Kasa</option>';
+  else if(yontem==="banka") html=bankalar.length===0?'<option value="">Önce banka hesabı ekle</option>':bankalar.map(b=>'<option value="'+b.id+'">'+b.ad+'</option>').join("");
+  else if(yontem==="kart") html=kartlar.length===0?'<option value="">Önce kart ekle</option>':kartlar.map(k=>'<option value="'+k.id+'">'+k.ad+'</option>').join("");
+  sel.innerHTML=html;
+}
+
 function hesapla(){
   bankalar.forEach(b=>delete b.__calc); kartlar.forEach(k=>delete k.__calc);
   let nakit=0, alacak=0, borc=0, aktifAlacakToplam=0;
   let sahsiToplam=0, evToplam=0, babamaToplam=0, selaleGidaToplam=0, selaleFotoToplam=0, atolyeToplam=0, digerToplam=0;
 
-  kisiler.forEach(k=>{ if(k.tip==="alacak") alacak+=Number(k.tutar||0); else borc+=Number(k.tutar||0); });
-
   islemler.forEach(i=>{
+    if(i.bagliKisiId) return; // Eski çift kayıtlar hesaba katılmasın.
     const t=Number(i.tutar||0);
     if(i.yontem==="nakit") nakit += i.tip==="gelir" ? t : -t;
     else if(i.yontem==="banka"){
@@ -271,6 +286,33 @@ function hesapla(){
     if(i.tip === 'gider'){
       if(isSahsiKategori(i.kategori)) sahsiToplam += t;
       else if(isEvKategori(i.kategori)) evToplam += t;
+    }
+  });
+
+  kisiler.forEach(k=>{
+    const t=Number(k.tutar||0);
+    if(k.tip==="alacak"){
+      alacak += t;
+      if(k.yontem==="nakit" || !k.yontem) nakit -= t;
+      else if(k.yontem==="banka"){
+        const b=bankalar.find(x=>x.id===k.kaynak);
+        if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) - t;
+      }
+      else if(k.yontem==="kart"){
+        const kk=kartlar.find(x=>x.id===k.kaynak);
+        if(kk) kk.__calc=(kk.__calc ?? Number(kk.borc||0)) + t;
+      }
+    } else {
+      borc += t;
+      if(k.yontem==="nakit" || !k.yontem) nakit += t;
+      else if(k.yontem==="banka"){
+        const b=bankalar.find(x=>x.id===k.kaynak);
+        if(b) b.__calc=(b.__calc ?? Number(b.bakiye||0)) + t;
+      }
+      else if(k.yontem==="kart"){
+        const kk=kartlar.find(x=>x.id===k.kaynak);
+        if(kk) kk.__calc=(kk.__calc ?? Number(kk.borc||0)) - t;
+      }
     }
   });
 
@@ -334,7 +376,8 @@ function render(){
   const kisiListe=document.getElementById("kisiListe");
   kisiListe.innerHTML=kisiler.length?"":'<div class="empty">Henüz borç / alacak yok.</div>';
   kisiler.forEach(k=>{
-    kisiListe.innerHTML += '<div class="item"><div class="row"><div><div class="title">'+k.ad+'</div><div class="sub">'+(k.tip==="alacak"?"Alacak":"Borç")+' '+(k.not?("• "+k.not):"")+'</div></div><div class="title '+(k.tip==="alacak"?"g":"r")+'">'+para(k.tutar)+'</div></div><div class="actions"><button class="primary" onclick="kisiDuzenle(\''+k.id+'\')">Düzenle</button><button class="danger" onclick="kisiSil(\''+k.id+'\')">Sil</button></div></div>';
+    const kaynakText = k.yontem==="nakit" ? "Nakit Kasa" : k.yontem==="banka" ? (((bankalar.find(x=>x.id===k.kaynak))||{}).ad || "Banka") : k.yontem==="kart" ? (((kartlar.find(x=>x.id===k.kaynak))||{}).ad || "Kart") : "Kaynak yok";
+    kisiListe.innerHTML += '<div class="item"><div class="row"><div><div class="title">'+k.ad+'</div><div class="sub">'+(k.tip==="alacak"?"Alacak / Borç Verdim":"Borç Aldım")+' • '+kaynakText+' '+(k.not?("• "+k.not):"")+'</div></div><div class="title '+(k.tip==="alacak"?"g":"r")+'">'+para(k.tutar)+'</div></div><div class="actions"><button class="primary" onclick="kisiDuzenle(\''+k.id+'\')">Düzenle</button><button class="danger" onclick="kisiSil(\''+k.id+'\')">Sil</button></div></div>';
   });
 
 
@@ -386,12 +429,13 @@ function render(){
   });
   const islemListe=document.getElementById("islemListe");
   islemListe.innerHTML=islemler.length?"":'<div class="empty">Henüz işlem yok.</div>';
-  islemler.forEach(i=>{
+  islemler.filter(i=>!i.bagliKisiId).forEach(i=>{
     const kaynakText = i.yontem==="nakit" ? "Nakit Kasa" : i.yontem==="banka" ? (((bankalar.find(x=>x.id===i.kaynak))||{}).ad || "Banka") : (((kartlar.find(x=>x.id===i.kaynak))||{}).ad || "Kart");
     islemListe.innerHTML += '<div class="item"><div class="row"><div><div class="title">'+(i.aciklama || i.kategori || "İşlem")+'</div><div class="sub">'+i.tarih+' • '+i.tip+' • '+i.yontem+' • '+kaynakText+'</div></div><div class="title '+(i.tip==="gelir"?"g":"r")+'">'+(i.tip==="gelir"?"+":"-")+' '+para(i.tutar)+'</div></div><div class="actions"><button class="primary" onclick="islemDuzenle(\''+i.id+'\')">Düzenle</button><button class="danger" onclick="islemSil(\''+i.id+'\')">Sil</button></div></div>';
   });
 
   yenileKaynakSecimi();
+    yenileKisiKaynakSecimi();
   renderOdemeTarihleri();
 }
 
@@ -411,6 +455,8 @@ async function tumVerileriYukle(){
     kisiler = results[2].docs.map(d => ({id:d.id, ...d.data()}));
     islemler = results[3].docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
     alacakTakipleri = results[4].docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+    yenileKaynakSecimi();
+    yenileKisiKaynakSecimi();
     render();
     durum("Hazır");
   }catch(e){
@@ -451,10 +497,18 @@ async function kisiKaydet(){
   const ad=document.getElementById("kisiAd").value.trim();
   const tip=document.getElementById("kisiTip").value;
   const tutar=Number(document.getElementById("kisiTutar").value||0);
+  const yontem=document.getElementById("kisiYontem").value;
+  const kaynak=document.getElementById("kisiKaynakSecim").value;
   const not=document.getElementById("kisiNot").value.trim();
   if(!ad || !tutar){ alert("Kişi adı ve tutar gir."); return; }
+  if((yontem==="banka" || yontem==="kart") && !kaynak){ alert("Hesap seç."); return; }
+
   try{
-    await db.collection("kisiler").add({ad,tip,tutar,not,createdAt:new Date().toISOString()});
+    await db.collection("kisiler").add({ad,tip,tutar,yontem,kaynak,not,createdAt:new Date().toISOString()});
+
+    // Çift kayıt olmasın diye artık ayrıca "islemler" kaydı açılmıyor.
+    // Kasa etkisi hesapla() içinde doğrudan borç/alacak kaydından hesaplanıyor.
+
     document.getElementById("kisiAd").value="";
     document.getElementById("kisiTutar").value="";
     document.getElementById("kisiNot").value="";
@@ -498,7 +552,17 @@ async function islemKaydet(){
 
 async function bankaSil(id){ if(!confirm("Banka hesabı silinsin mi?")) return; try{ await db.collection("bankalar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
 async function kartSil(id){ if(!confirm("Kart silinsin mi?")) return; try{ await db.collection("kartlar").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
-async function kisiSil(id){ if(!confirm("Kayıt silinsin mi?")) return; try{ await db.collection("kisiler").doc(id).delete(); tumVerileriYukle(); }catch(e){ alert(e.message); } }
+async function kisiSil(id){
+  if(!confirm("Kayıt silinsin mi?")) return;
+  try{
+    const bagli = await db.collection("islemler").where("bagliKisiId","==",id).get();
+    const batch = db.batch();
+    bagli.forEach(docSnap=>batch.delete(docSnap.ref));
+    batch.delete(db.collection("kisiler").doc(id));
+    await batch.commit();
+    tumVerileriYukle();
+  }catch(e){ alert(e.message); }
+}
 async function islemSil(id){
   if(!confirm("İşlem silinsin mi?")) return;
   try{
@@ -530,8 +594,22 @@ async function kisiDuzenle(id){
   const ad=prompt("Yeni kişi adı",x.ad); if(ad===null) return;
   const tutar=prompt("Yeni tutar",x.tutar); if(tutar===null) return;
   const not=prompt("Yeni not",x.not||""); if(not===null) return;
-  await db.collection("kisiler").doc(id).update({ad,tutar:Number(tutar||0),not});
-  tumVerileriYukle();
+  const yeniTutar=Number(tutar||0);
+  if(!ad || !yeniTutar){ alert("Geçerli ad ve tutar gir."); return; }
+
+  try{
+    await db.collection("kisiler").doc(id).update({ad,tutar:yeniTutar,not});
+
+    // Eski sürümden kalmış bağlı işlem varsa silinir.
+    const bagli = await db.collection("islemler").where("bagliKisiId","==",id).get();
+    if(!bagli.empty){
+      const batch = db.batch();
+      bagli.forEach(docSnap=>batch.delete(docSnap.ref));
+      await batch.commit();
+    }
+
+    tumVerileriYukle();
+  }catch(e){ alert("Düzenleme hatası: "+e.message); }
 }
 async function islemDuzenle(id){
   const x=islemler.find(v=>v.id===id); if(!x) return;
@@ -635,12 +713,15 @@ function initButtons(){
   document.getElementById("kisiKaydetBtn").addEventListener("click", kisiKaydet);
   document.getElementById("islemKaydetBtn").addEventListener("click", islemKaydet);
   document.getElementById("islemTip").addEventListener("change", kategoriAlaniniAyarla);
+  document.getElementById("kisiYontem").addEventListener("change", yenileKisiKaynakSecimi);
   kategoriAlaniniAyarla();
+  yenileKisiKaynakSecimi();
 }
 
 window.showTab=showTab;
 window.showTabById=showTabById;
 window.yenileKaynakSecimi=yenileKaynakSecimi;
+window.yenileKisiKaynakSecimi=yenileKisiKaynakSecimi;
 window.bankaDuzenle=bankaDuzenle;
 window.bankaSil=bankaSil;
 window.kartDuzenle=kartDuzenle;
