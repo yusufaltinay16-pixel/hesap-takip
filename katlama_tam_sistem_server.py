@@ -499,14 +499,14 @@ def workers():
       <table><tr><th>ID</th><th>Eleman</th><th>Telefon</th><th>Durum</th><th>Özel Link</th><th>WhatsApp</th><th>Link Yenile</th><th>İşlem</th></tr>{trs}</table>
     </div>
     <script>
-      function copyLink(id) {
+      function copyLink(id) {{
         const text = document.getElementById(id).innerText.trim();
-        navigator.clipboard.writeText(text).then(function() {
+        navigator.clipboard.writeText(text).then(function() {{
           alert("Link kopyalandı. WhatsApp'a yapıştırıp gönderebilirsin.");
-        }).catch(function() {
+        }}).catch(function() {{
           prompt("Linki kopyala:", text);
-        });
-      }
+        }});
+      }}
     </script>
     """
     return page("Elemanlar ve WhatsApp Linkleri", body)
