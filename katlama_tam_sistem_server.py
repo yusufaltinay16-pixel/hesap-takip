@@ -12,7 +12,7 @@ import secrets
 from urllib.parse import quote
 
 DB_FILE = "katlama_tam_sistem.db"
-PORT = 8096
+PORT = 10000
 
 app = FastAPI(title="Katlama Atölyesi Tam Sistem")
 
