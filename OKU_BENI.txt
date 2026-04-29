@@ -1,0 +1,66 @@
+
+KATLAMA ATÖLYESİ TAM SİSTEM
+
+BU SİSTEMDE NELER VAR?
+- Eleman özel WhatsApp linki
+- Eleman linke tıklar, sadece kendi adetini girer
+- Eleman kendi bugünkü ve aylık toplamını görür
+- Yönetici telefondan veya bilgisayardan tüm sistemi görür
+- Firma ücreti ayrı girilir
+- Eleman ücreti ayrı girilir
+- Ürün bazlı eşarp / şal / diğer tekstil fiyatları ayrı olur
+- Masraf eklenir
+- Ödeme eklenir
+- Ay sonu net kazanç otomatik hesaplanır
+- Excel uyumlu CSV rapor alınır
+
+HESAP FORMÜLÜ
+Ciro = Adet x Firmadan aldığın ücret
+Eleman hak edişi = Adet x Elemana verdiğin ücret
+Brüt kazanç = Ciro - Eleman hak edişi
+Net kazanç = Ciro - Eleman hak edişi - Masraflar
+
+BAŞLATMA
+1) BASLAT.bat dosyasına çift tıkla.
+2) Yönetim paneli:
+   http://127.0.0.1:8096/dashboard
+
+TELEFONDA KULLANMA
+Aynı Wi-Fi içinden:
+http://BILGISAYAR_IP:8096
+
+FARKLI İNTERNETTEN KULLANMA
+ngrok aç:
+ngrok http 8096
+
+Ngrok sana https://... adresi verir.
+Elemanlar sayfasındaki özel linklerde baştaki yerel adres yerine ngrok adresini kullanman gerekir.
+
+WHATSAPP LINK
+Yönetim paneli > Eleman Linkleri
+Her elemanın yanında "WhatsApp'a At" butonu var.
+Buna basınca link WhatsApp ile gönderilir.
+
+ARKA PLANDA ÇALIŞTIRMA
+BASLAT_GIZLI.vbs dosyasına çift tıkla.
+Siyah ekran görünmez, sistem arka planda çalışır.
+
+DURDURMA
+DURDUR_8096.bat dosyasına çift tıkla.
+
+ÖNEMLİ
+Bilgisayar tamamen kapalıysa sistem çalışmaz.
+Bilgisayar kapalıyken de çalışmasını istiyorsan sistem buluta/VPS'ye kurulmalıdır.
+
+
+YENİ EKLENDİ
+- Eleman kendi yanlış girdiği kaydı kendi ekranından Güncelle veya Sil yapabilir.
+- Eleman sadece kendine ait kayıtları değiştirebilir; başka elemanın kaydını göremez/değiştiremez.
+
+
+WHATSAPP LİNK DÜZELTMESİ
+- Link artık WhatsApp mesajında ayrı satırda gider.
+- Böylece üstüne basınca açılma ihtimali daha yüksek olur.
+- Eleman telefonda aynı Wi-Fi'de değilse 192.168 ile başlayan link açılmaz.
+- Farklı internet için ngrok linki gerekir.
+- WhatsApp linki yine tıklanabilir olmazsa yönetimdeki "Linki Kopyala" butonuyla kopyalayıp mesaj olarak tek başına gönder.
