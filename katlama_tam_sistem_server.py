@@ -3,16 +3,17 @@ import sqlite3
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 import uvicorn
 import socket
 import csv
 import secrets
+import os
 from urllib.parse import quote
 
 DB_FILE = "katlama_tam_sistem.db"
-PORT = 10000
+PORT = int(os.environ.get("PORT", "10000"))
 
 app = FastAPI(title="Katlama Atölyesi Tam Sistem")
 
@@ -458,9 +459,9 @@ def worker_delete_entry(token: str, entry_id: int):
 
 
 @app.get("/workers", response_class=HTMLResponse)
-def workers():
+def workers(request: Request):
     data = rows("SELECT id,name,phone,token,active FROM workers ORDER BY active DESC,name")
-    base = base_url()
+    base = str(request.base_url).rstrip("/")
     trs = ""
     for r in data:
         link = f"{base}/w/{r['token']}"
