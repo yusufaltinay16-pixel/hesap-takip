@@ -1,5 +1,4 @@
 
-import sqlite3
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
@@ -9,11 +8,13 @@ import uvicorn
 import socket
 import csv
 import secrets
-import os
 from urllib.parse import quote
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-DB_FILE = "katlama_tam_sistem.db"
 PORT = int(os.environ.get("PORT", "10000"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 app = FastAPI(title="Katlama Atölyesi Tam Sistem")
 
@@ -32,30 +33,39 @@ def money(v):
     except:
         return "0,00 ₺"
 
+
 def db():
-    con = sqlite3.connect(DB_FILE)
-    con.row_factory = sqlite3.Row
-    return con
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL ayarlanmamış. Render > Environment bölümüne Supabase PostgreSQL bağlantı adresini ekle.")
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 def rows(q, p=()):
     con = db()
-    r = con.execute(q, p).fetchall()
-    con.close()
-    return r
+    try:
+        with con.cursor() as cur:
+            cur.execute(q, p)
+            return cur.fetchall()
+    finally:
+        con.close()
 
 def one(q, p=()):
     con = db()
-    r = con.execute(q, p).fetchone()
-    con.close()
-    return r
+    try:
+        with con.cursor() as cur:
+            cur.execute(q, p)
+            return cur.fetchone()
+    finally:
+        con.close()
 
 def exec_db(q, p=()):
     con = db()
-    cur = con.execute(q, p)
-    con.commit()
-    last = cur.lastrowid
-    con.close()
-    return last
+    try:
+        with con.cursor() as cur:
+            cur.execute(q, p)
+            con.commit()
+            return None
+    finally:
+        con.close()
 
 def local_ip():
     try:
@@ -76,7 +86,7 @@ def init_db():
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS workers(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         phone TEXT,
         token TEXT UNIQUE,
@@ -87,7 +97,7 @@ def init_db():
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS products(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         firm_price REAL NOT NULL DEFAULT 0,
         worker_price REAL NOT NULL DEFAULT 0,
@@ -98,7 +108,7 @@ def init_db():
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS entries(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         work_date TEXT NOT NULL,
         worker_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
@@ -108,26 +118,25 @@ def init_db():
         note TEXT,
         created_at TEXT NOT NULL,
         source TEXT DEFAULT 'telefon',
-        FOREIGN KEY(worker_id) REFERENCES workers(id),
-        FOREIGN KEY(product_id) REFERENCES products(id)
+        
+        
     )
     """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS payments(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         pay_date TEXT NOT NULL,
         worker_id INTEGER NOT NULL,
         amount REAL NOT NULL,
         note TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(worker_id) REFERENCES workers(id)
+        created_at TEXT NOT NULL
     )
     """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS expenses(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         exp_date TEXT NOT NULL,
         category TEXT NOT NULL,
         amount REAL NOT NULL,
@@ -142,12 +151,12 @@ def init_db():
         ("Tekstil Ürün", 0, 0),
     ]:
         c.execute(
-            "INSERT OR IGNORE INTO products(name, firm_price, worker_price, active, created_at) VALUES(?,?,?,?,?)",
+            "INSERT INTO products(name, firm_price, worker_price, active, created_at) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(name) DO NOTHING",
             (name, firm_price, worker_price, 1, now_iso())
         )
 
     for r in c.execute("SELECT id FROM workers WHERE token IS NULL OR token=''").fetchall():
-        c.execute("UPDATE workers SET token=? WHERE id=?", (secrets.token_urlsafe(12), r[0]))
+        c.execute("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(12), r["id"]))
 
     con.commit()
     con.close()
@@ -212,6 +221,14 @@ def startup():
 def home():
     return RedirectResponse("/dashboard", status_code=303)
 
+@app.get("/health", response_class=HTMLResponse)
+def health():
+    try:
+        init_db()
+        return "OK - Supabase/PostgreSQL veritabanı bağlı"
+    except Exception as e:
+        return f"HATA: {e}"
+
 def month_summary(m):
     like = m + "%"
     s = one("""
@@ -219,12 +236,12 @@ def month_summary(m):
       COALESCE(SUM(qty),0) qty,
       COALESCE(SUM(qty*firm_price),0) revenue,
       COALESCE(SUM(qty*worker_price),0) labor_cost
-    FROM entries WHERE work_date LIKE ?
+    FROM entries WHERE work_date LIKE %s
     """, (like,))
-    exp = one("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE exp_date LIKE ?", (like,))["total"] or 0
-    paid = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE pay_date LIKE ?", (like,))["total"] or 0
-    revenue = s["revenue"] or 0
-    labor = s["labor_cost"] or 0
+    exp = float(one("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE exp_date LIKE %s", (like,))["total"] or 0)
+    paid = float(one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE pay_date LIKE %s", (like,))["total"] or 0)
+    revenue = float(s["revenue"] or 0)
+    labor = float(s["labor_cost"] or 0)
     gross = revenue - labor
     net = revenue - labor - exp
     return {
@@ -289,15 +306,15 @@ def dashboard(m: Optional[str]=None):
 
 @app.get("/w/{token}", response_class=HTMLResponse)
 def worker_page(token: str, saved: Optional[str]=None, error: Optional[str]=None):
-    worker = one("SELECT * FROM workers WHERE token=? AND active=1", (token,))
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
     if not worker:
         return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
 
     products = rows("SELECT id,name,worker_price FROM products WHERE active=1 ORDER BY name")
     product_opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
     like = this_month()+"%"
-    total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=? AND work_date LIKE ?", (worker["id"], like))
-    today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=? AND work_date=?", (worker["id"], today()))
+    total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s AND work_date LIKE %s", (worker["id"], like))
+    today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
     msg = ""
     if saved:
         msg = "<div class='notice'>Adet kaydedildi.</div>"
@@ -307,7 +324,7 @@ def worker_page(token: str, saved: Optional[str]=None, error: Optional[str]=None
     last_rows = rows("""
     SELECT e.id,e.work_date,p.name product,e.qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note
     FROM entries e JOIN products p ON p.id=e.product_id
-    WHERE e.worker_id=?
+    WHERE e.worker_id=%s
     ORDER BY e.work_date DESC,e.id DESC LIMIT 20
     """, (worker["id"],))
     trs = "".join([f'''<tr>
@@ -317,7 +334,7 @@ def worker_page(token: str, saved: Optional[str]=None, error: Optional[str]=None
     <td class='right'>{money(r['earned'])}</td>
     <td>
       <a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a>
-      <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a>
+      <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi%s')">Sil</a>
     </td>
 </tr>''' for r in last_rows])
 
@@ -354,30 +371,30 @@ def worker_page(token: str, saved: Optional[str]=None, error: Optional[str]=None
 
 @app.post("/w/{token}/add")
 def worker_add(token: str, work_date: str=Form(...), product_id: int=Form(...), qty: int=Form(...), note: str=Form("")):
-    worker = one("SELECT * FROM workers WHERE token=? AND active=1", (token,))
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
     if not worker:
-        return RedirectResponse(f"/w/{token}?error=Link geçersiz", status_code=303)
-    product = one("SELECT * FROM products WHERE id=? AND active=1", (product_id,))
+        return RedirectResponse(f"/w/{token}%serror=Link geçersiz", status_code=303)
+    product = one("SELECT * FROM products WHERE id=%s AND active=1", (product_id,))
     if not product:
-        return RedirectResponse(f"/w/{token}?error=Ürün bulunamadı", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Ürün bulunamadı", status_code=303)
     try:
         datetime.strptime(work_date, "%Y-%m-%d")
         qty = int(qty)
         if qty <= 0:
             raise ValueError()
     except:
-        return RedirectResponse(f"/w/{token}?error=Tarih veya adet hatalı", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Tarih veya adet hatalı", status_code=303)
 
     exec_db("""
     INSERT INTO entries(work_date, worker_id, product_id, qty, firm_price, worker_price, note, created_at, source)
-    VALUES(?,?,?,?,?,?,?,?,?)
+    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (work_date, worker["id"], product_id, qty, float(product["firm_price"] or 0), float(product["worker_price"] or 0), note, now_iso(), "whatsapp-link"))
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
+    return RedirectResponse(f"/w/{token}%ssaved=1", status_code=303)
 
 
 @app.get("/w/{token}/edit/{entry_id}", response_class=HTMLResponse)
 def worker_edit_page(token: str, entry_id: int):
-    worker = one("SELECT * FROM workers WHERE token=? AND active=1", (token,))
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
     if not worker:
         return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
 
@@ -385,7 +402,7 @@ def worker_edit_page(token: str, entry_id: int):
     SELECT e.*, p.name product
     FROM entries e
     JOIN products p ON p.id=e.product_id
-    WHERE e.id=? AND e.worker_id=?
+    WHERE e.id=%s AND e.worker_id=%s
     """, (entry_id, worker["id"]))
 
     if not entry:
@@ -419,17 +436,17 @@ def worker_edit_page(token: str, entry_id: int):
 
 @app.post("/w/{token}/edit/{entry_id}")
 def worker_edit_save(token: str, entry_id: int, work_date: str=Form(...), product_id: int=Form(...), qty: int=Form(...), note: str=Form("")):
-    worker = one("SELECT * FROM workers WHERE token=? AND active=1", (token,))
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
     if not worker:
-        return RedirectResponse(f"/w/{token}?error=Link geçersiz", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Link geçersiz", status_code=303)
 
-    entry = one("SELECT * FROM entries WHERE id=? AND worker_id=?", (entry_id, worker["id"]))
+    entry = one("SELECT * FROM entries WHERE id=%s AND worker_id=%s", (entry_id, worker["id"]))
     if not entry:
-        return RedirectResponse(f"/w/{token}?error=Kayıt bulunamadı", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Kayıt bulunamadı", status_code=303)
 
-    product = one("SELECT * FROM products WHERE id=? AND active=1", (product_id,))
+    product = one("SELECT * FROM products WHERE id=%s AND active=1", (product_id,))
     if not product:
-        return RedirectResponse(f"/w/{token}?error=Ürün bulunamadı", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Ürün bulunamadı", status_code=303)
 
     try:
         datetime.strptime(work_date, "%Y-%m-%d")
@@ -437,25 +454,25 @@ def worker_edit_save(token: str, entry_id: int, work_date: str=Form(...), produc
         if qty <= 0:
             raise ValueError()
     except:
-        return RedirectResponse(f"/w/{token}?error=Tarih veya adet hatalı", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Tarih veya adet hatalı", status_code=303)
 
     exec_db("""
     UPDATE entries
-    SET work_date=?, product_id=?, qty=?, firm_price=?, worker_price=?, note=?
-    WHERE id=? AND worker_id=?
+    SET work_date=%s, product_id=%s, qty=%s, firm_price=%s, worker_price=%s, note=%s
+    WHERE id=%s AND worker_id=%s
     """, (work_date, product_id, qty, float(product["firm_price"] or 0), float(product["worker_price"] or 0), note, entry_id, worker["id"]))
 
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
+    return RedirectResponse(f"/w/{token}%ssaved=1", status_code=303)
 
 
 @app.get("/w/{token}/delete/{entry_id}")
 def worker_delete_entry(token: str, entry_id: int):
-    worker = one("SELECT * FROM workers WHERE token=? AND active=1", (token,))
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
     if not worker:
-        return RedirectResponse(f"/w/{token}?error=Link geçersiz", status_code=303)
+        return RedirectResponse(f"/w/{token}%serror=Link geçersiz", status_code=303)
 
-    exec_db("DELETE FROM entries WHERE id=? AND worker_id=?", (entry_id, worker["id"]))
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
+    exec_db("DELETE FROM entries WHERE id=%s AND worker_id=%s", (entry_id, worker["id"]))
+    return RedirectResponse(f"/w/{token}%ssaved=1", status_code=303)
 
 
 @app.get("/workers", response_class=HTMLResponse)
@@ -477,7 +494,7 @@ def workers(request: Request):
             <button class="btn gray" type="button" onclick="copyLink('link_{r['id']}')">Linki Kopyala</button>
           </td>
           <td>
-            <a class="btn green" target="_blank" href="https://wa.me/?text={wa_text}">WhatsApp'a At</a>
+            <a class="btn green" target="_blank" href="https://wa.me/%stext={wa_text}">WhatsApp'a At</a>
           </td>
           <td><a class="btn yellow" href="/worker-new-link/{r['id']}">Yeni Link</a></td>
           <td><a class="btn red" href="/worker-off/{r['id']}">Pasifleştir</a></td>
@@ -518,22 +535,22 @@ def add_worker(name:str=Form(...), phone:str=Form("")):
     phone=phone.strip()
     if name:
         con=db()
-        old=con.execute("SELECT id FROM workers WHERE name=?", (name,)).fetchone()
+        old=con.execute("SELECT id FROM workers WHERE name=%s", (name,)).fetchone()
         if old:
-            con.execute("UPDATE workers SET active=1, phone=COALESCE(NULLIF(?,''),phone) WHERE name=?", (phone,name))
+            con.execute("UPDATE workers SET active=1, phone=COALESCE(NULLIF(%s,''),phone) WHERE name=%s", (phone,name))
         else:
-            con.execute("INSERT INTO workers(name,phone,token,active,created_at) VALUES(?,?,?,?,?)", (name,phone,secrets.token_urlsafe(12),1,now_iso()))
+            con.execute("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,%s,%s)", (name,phone,secrets.token_urlsafe(12),1,now_iso()))
         con.commit(); con.close()
     return RedirectResponse("/workers", status_code=303)
 
 @app.get("/worker-new-link/{worker_id}")
 def worker_new_link(worker_id:int):
-    exec_db("UPDATE workers SET token=? WHERE id=?", (secrets.token_urlsafe(12), worker_id))
+    exec_db("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(12), worker_id))
     return RedirectResponse("/workers", status_code=303)
 
 @app.get("/worker-off/{worker_id}")
 def worker_off(worker_id:int):
-    exec_db("UPDATE workers SET active=0 WHERE id=?", (worker_id,))
+    exec_db("UPDATE workers SET active=0 WHERE id=%s", (worker_id,))
     return RedirectResponse("/workers", status_code=303)
 
 @app.get("/products", response_class=HTMLResponse)
@@ -571,7 +588,7 @@ def add_product(name:str=Form(...), firm_price:float=Form(...), worker_price:flo
     name=name.strip()
     con=db()
     con.execute("""
-    INSERT INTO products(name,firm_price,worker_price,active,created_at) VALUES(?,?,?,?,?)
+    INSERT INTO products(name,firm_price,worker_price,active,created_at) VALUES(%s,%s,%s,%s,%s)
     ON CONFLICT(name) DO UPDATE SET firm_price=excluded.firm_price, worker_price=excluded.worker_price, active=1
     """, (name, firm_price, worker_price, 1, now_iso()))
     con.commit(); con.close()
@@ -579,7 +596,7 @@ def add_product(name:str=Form(...), firm_price:float=Form(...), worker_price:flo
 
 @app.get("/product-off/{product_id}")
 def product_off(product_id:int):
-    exec_db("UPDATE products SET active=0 WHERE id=?", (product_id,))
+    exec_db("UPDATE products SET active=0 WHERE id=%s", (product_id,))
     return RedirectResponse("/products", status_code=303)
 
 @app.get("/expenses", response_class=HTMLResponse)
@@ -605,12 +622,12 @@ def expenses():
 
 @app.post("/add-expense")
 def add_expense(exp_date:str=Form(...), category:str=Form(...), amount:float=Form(...), note:str=Form("")):
-    exec_db("INSERT INTO expenses(exp_date,category,amount,note,created_at) VALUES(?,?,?,?,?)", (exp_date, category, amount, note, now_iso()))
+    exec_db("INSERT INTO expenses(exp_date,category,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (exp_date, category, amount, note, now_iso()))
     return RedirectResponse("/expenses", status_code=303)
 
 @app.get("/delete-expense/{eid}")
 def delete_expense(eid:int):
-    exec_db("DELETE FROM expenses WHERE id=?", (eid,))
+    exec_db("DELETE FROM expenses WHERE id=%s", (eid,))
     return RedirectResponse("/expenses", status_code=303)
 
 @app.get("/payments", response_class=HTMLResponse)
@@ -637,12 +654,12 @@ def payments():
 
 @app.post("/add-payment")
 def add_payment(pay_date:str=Form(...), worker_id:int=Form(...), amount:float=Form(...), note:str=Form("")):
-    exec_db("INSERT INTO payments(pay_date,worker_id,amount,note,created_at) VALUES(?,?,?,?,?)", (pay_date,worker_id,amount,note,now_iso()))
+    exec_db("INSERT INTO payments(pay_date,worker_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (pay_date,worker_id,amount,note,now_iso()))
     return RedirectResponse("/payments", status_code=303)
 
 @app.get("/delete-payment/{pid}")
 def delete_payment(pid:int):
-    exec_db("DELETE FROM payments WHERE id=?", (pid,))
+    exec_db("DELETE FROM payments WHERE id=%s", (pid,))
     return RedirectResponse("/payments", status_code=303)
 
 @app.get("/month", response_class=HTMLResponse)
@@ -655,14 +672,14 @@ def month(m: Optional[str]=None):
     by_worker = rows("""
     SELECT w.id,w.name worker, COALESCE(SUM(e.qty),0) qty, COALESCE(SUM(e.qty*e.worker_price),0) earned
     FROM workers w
-    LEFT JOIN entries e ON e.worker_id=w.id AND e.work_date LIKE ?
+    LEFT JOIN entries e ON e.worker_id=w.id AND e.work_date LIKE %s
     WHERE w.active=1
     GROUP BY w.id,w.name
     ORDER BY w.name
     """, (like,))
     trs=""
     for r in by_worker:
-        paid=one("SELECT COALESCE(SUM(amount),0) paid FROM payments WHERE worker_id=? AND pay_date LIKE ?", (r["id"], like))["paid"] or 0
+        paid=one("SELECT COALESCE(SUM(amount),0) paid FROM payments WHERE worker_id=%s AND pay_date LIKE %s", (r["id"], like))["paid"] or 0
         remain=(r["earned"] or 0)-paid
         trs += f"<tr><td>{r['worker']}</td><td class='right'>{int(r['qty'] or 0)}</td><td class='right'>{money(r['earned'] or 0)}</td><td class='right'>{money(paid)}</td><td class='right'>{money(remain)}</td></tr>"
 
@@ -671,7 +688,7 @@ def month(m: Optional[str]=None):
            COALESCE(SUM(e.qty*e.worker_price),0) labor,
            COALESCE(SUM(e.qty*(e.firm_price-e.worker_price)),0) gross
     FROM products p
-    LEFT JOIN entries e ON e.product_id=p.id AND e.work_date LIKE ?
+    LEFT JOIN entries e ON e.product_id=p.id AND e.work_date LIKE %s
     GROUP BY p.id,p.name
     ORDER BY p.name
     """, (like,))
@@ -683,7 +700,7 @@ def month(m: Optional[str]=None):
         <label>Ay seç: YYYY-AA</label>
         <input name="m" value="{m}" style="max-width:180px;display:inline-block">
         <button class="btn green">Hesapla</button>
-        <a class="btn yellow" href="/export-month?m={m}">Excel/CSV Rapor Al</a>
+        <a class="btn yellow" href="/export-month%sm={m}">Excel/CSV Rapor Al</a>
       </form>
     </div>
     <div class="kpis">
@@ -723,13 +740,13 @@ def export_month(m: Optional[str]=None):
         by_worker = rows("""
         SELECT w.id,w.name worker, COALESCE(SUM(e.qty),0) qty, COALESCE(SUM(e.qty*e.worker_price),0) earned
         FROM workers w
-        LEFT JOIN entries e ON e.worker_id=w.id AND e.work_date LIKE ?
+        LEFT JOIN entries e ON e.worker_id=w.id AND e.work_date LIKE %s
         WHERE w.active=1
         GROUP BY w.id,w.name
         ORDER BY w.name
         """, (like,))
         for r in by_worker:
-            paid=one("SELECT COALESCE(SUM(amount),0) paid FROM payments WHERE worker_id=? AND pay_date LIKE ?", (r["id"], like))["paid"] or 0
+            paid=one("SELECT COALESCE(SUM(amount),0) paid FROM payments WHERE worker_id=%s AND pay_date LIKE %s", (r["id"], like))["paid"] or 0
             remain=(r["earned"] or 0)-paid
             wr.writerow([r["worker"], int(r["qty"] or 0), f"{r['earned'] or 0:.2f}", f"{paid:.2f}", f"{remain:.2f}"])
 
@@ -741,7 +758,7 @@ def export_month(m: Optional[str]=None):
                COALESCE(SUM(e.qty*e.worker_price),0) labor,
                COALESCE(SUM(e.qty*(e.firm_price-e.worker_price)),0) gross
         FROM products p
-        LEFT JOIN entries e ON e.product_id=p.id AND e.work_date LIKE ?
+        LEFT JOIN entries e ON e.product_id=p.id AND e.work_date LIKE %s
         GROUP BY p.id,p.name
         ORDER BY p.name
         """, (like,))
@@ -755,7 +772,7 @@ def export_month(m: Optional[str]=None):
         SELECT e.work_date,w.name worker,p.name product,e.qty,e.firm_price,e.worker_price,
                e.qty*e.firm_price revenue,e.qty*e.worker_price labor,e.qty*(e.firm_price-e.worker_price) gross,COALESCE(e.note,'') note
         FROM entries e JOIN workers w ON w.id=e.worker_id JOIN products p ON p.id=e.product_id
-        WHERE e.work_date LIKE ?
+        WHERE e.work_date LIKE %s
         ORDER BY e.work_date,e.id
         """, (like,))
         for r in details:
@@ -764,7 +781,7 @@ def export_month(m: Optional[str]=None):
         wr.writerow([])
         wr.writerow(["MASRAFLAR"])
         wr.writerow(["Tarih","Kategori","Tutar","Not"])
-        exps = rows("SELECT * FROM expenses WHERE exp_date LIKE ? ORDER BY exp_date,id", (like,))
+        exps = rows("SELECT * FROM expenses WHERE exp_date LIKE %s ORDER BY exp_date,id", (like,))
         for r in exps:
             wr.writerow([r["exp_date"],r["category"],f"{r['amount']:.2f}",r["note"] or ""])
 
@@ -772,7 +789,7 @@ def export_month(m: Optional[str]=None):
 
 @app.get("/delete-entry/{entry_id}")
 def delete_entry(entry_id:int):
-    exec_db("DELETE FROM entries WHERE id=?", (entry_id,))
+    exec_db("DELETE FROM entries WHERE id=%s", (entry_id,))
     return RedirectResponse("/dashboard", status_code=303)
 
 if __name__ == "__main__":
