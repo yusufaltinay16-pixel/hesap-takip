@@ -375,12 +375,12 @@ def workers(request: Request):
     trs = ""
     for r in data:
         link = f"{base}/w/{r['token']}"
-        wa_msg = f"Merhaba {r['name']}
+        wa_msg = f"""Merhaba {r['name']}
 
 Katlama adet giriş linkin:
 {link}
 
-Linke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."
+Linke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."""
         wa_text = quote(wa_msg)
         trs += f"""<tr><td>{r['id']}</td><td>{r['name']}</td><td>{r['phone'] or ''}</td><td>{'Aktif' if r['active'] else 'Pasif'}</td><td><span class="copy" id="link_{r['id']}">{link}</span><br><button class="btn gray" type="button" onclick="copyLink('link_{r['id']}')">Linki Kopyala</button></td><td><a class="btn green" target="_blank" href="https://wa.me/?text={wa_text}">WhatsApp'a At</a></td><td><a class="btn yellow" href="/worker-new-link/{r['id']}">Yeni Link</a></td><td><a class="btn red" href="/worker-off/{r['id']}">Pasifleştir</a></td></tr>"""
     body = f"""<div class="card"><h2>Eleman Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Ad Soyad</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05xx..."></div></div><br><button class="btn green">Eleman Ekle</button></form></div><div class="card"><h2>WhatsApp Özel Linkleri</h2><p class="small">Her elemana ayrı link gider. Eleman sadece kendi ekranını görür.</p><table><tr><th>ID</th><th>Eleman</th><th>Telefon</th><th>Durum</th><th>Özel Link</th><th>WhatsApp</th><th>Link Yenile</th><th>İşlem</th></tr>{trs}</table></div><script>function copyLink(id){{const text=document.getElementById(id).innerText.trim();navigator.clipboard.writeText(text).then(function(){{alert('Link kopyalandı.')}}).catch(function(){{prompt('Linki kopyala:',text);}});}}</script>"""
