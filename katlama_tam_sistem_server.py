@@ -543,13 +543,29 @@ def products():
 
 @app.post("/add-product")
 def add_product(name: str = Form(...), firm_price: float = Form(...), worker_price: float = Form(...)):
-    name = name.strip()
+    name = " ".join(name.strip().split())
+    if not name:
+        return RedirectResponse("/products", status_code=303)
+
+    # Aynı ürün ismi tekrar yazılırsa yeni ürün açmaz, mevcut ürünü günceller.
+    # Büyük/küçük harf farkını da dikkate almaz: eşarp / Eşarp aynı kabul edilir.
     con = db()
-    con.execute("""
-    INSERT INTO products(name,firm_price,worker_price,active,created_at) VALUES(?,?,?,?,?)
-    ON CONFLICT(name) DO UPDATE SET firm_price=excluded.firm_price, worker_price=excluded.worker_price, active=1
-    """, (name, firm_price, worker_price, 1, now_iso()))
-    con.commit(); con.close()
+    old = con.execute("SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", (name,)).fetchone()
+
+    if old:
+        con.execute("""
+        UPDATE products
+        SET name=?, firm_price=?, worker_price=?, active=1
+        WHERE id=?
+        """, (name, firm_price, worker_price, old["id"]))
+    else:
+        con.execute("""
+        INSERT INTO products(name, firm_price, worker_price, active, created_at)
+        VALUES(?,?,?,?,?)
+        """, (name, firm_price, worker_price, 1, now_iso()))
+
+    con.commit()
+    con.close()
     return RedirectResponse("/products", status_code=303)
 
 
