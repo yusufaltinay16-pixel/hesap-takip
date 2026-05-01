@@ -290,6 +290,27 @@ def range_summary(start_date: str, end_date: str):
     }
 
 
+def general_summary():
+    # Tarih fark etmeksizin bütün kayıtların genel toplamı.
+    firma = one("""
+        SELECT
+            COALESCE(SUM(d.firm_qty),0) qty,
+            COALESCE(SUM(d.firm_qty * p.firm_price),0) revenue
+        FROM deliveries d
+        JOIN products p ON p.id=d.product_id
+    """)
+    labor_row = one("""
+        SELECT COALESCE(SUM(e.qty * e.worker_price),0) labor_cost
+        FROM entries e
+    """)
+    exp = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")["total"] or 0
+    paid = one("SELECT COALESCE(SUM(amount),0) total FROM payments")["total"] or 0
+    qty = firma["qty"] or 0
+    revenue = firma["revenue"] or 0
+    labor = labor_row["labor_cost"] or 0
+    return {"qty": qty, "revenue": revenue, "labor": labor, "expense": exp, "gross": revenue - labor, "net": revenue - labor - exp, "paid": paid, "labor_remaining": labor - paid}
+
+
 def month_summary(m):
     start_date = f"{m}-01"
     try:
@@ -319,6 +340,7 @@ def dashboard(start: Optional[str] = None, end: Optional[str] = None):
     start = valid_date_or_default(start, month_start())
     end = valid_date_or_default(end, today())
     sm = range_summary(start, end)
+    gs = general_summary()
 
     data = rows("""
     SELECT e.id,e.work_date,w.name worker,p.name product,e.qty,e.firm_price,e.worker_price,
@@ -371,11 +393,19 @@ def dashboard(start: Optional[str] = None, end: Optional[str] = None):
         <p class="small">Para hesabı firma teslim adedinden yapılır. Eleman adedi sadece işçilik ve karşılaştırma içindir.</p>
     </div>
     <div class="kpis">
-        <div class="kpi"><span>Firma Teslim Adet</span><b>{int(sm['qty'])}</b></div>
-        <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div>
-        <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
-        <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
+        <div class="kpi"><span>Seçilen Aralık Firma Teslim</span><b>{int(sm['qty'])}</b></div>
+        <div class="kpi"><span>Seçilen Aralık Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
+        <div class="kpi"><span>Seçilen Aralık İşçilik</span><b>{money(sm['labor'])}</b></div>
+        <div class="kpi"><span>Seçilen Aralık Masraf</span><b>{money(sm['expense'])}</b></div>
+        <div class="kpi"><span>Seçilen Aralık Net</span><b>{money(sm['net'])}</b></div>
+    </div>
+    <div class="card"><h2>Genel Toplam - Tarih Fark Etmez</h2><p class="small">Bu bölüm bütün kayıtların toplamıdır. Tarih filtresi uygulanmaz.</p></div>
+    <div class="kpis">
+        <div class="kpi"><span>Genel Firma Teslim Adet</span><b>{int(gs['qty'])}</b></div>
+        <div class="kpi"><span>Genel Firma Hak Ediş</span><b>{money(gs['revenue'])}</b></div>
+        <div class="kpi"><span>Genel İşçilik</span><b>{money(gs['labor'])}</b></div>
+        <div class="kpi"><span>Genel Masraflar</span><b>{money(gs['expense'])}</b></div>
+        <div class="kpi"><span>Genel Net Kazanç</span><b>{money(gs['net'])}</b></div>
     </div>
     <div class="card"><h2>Firma vs Eleman Karşılaştırma</h2><p class="small">Fark = Eleman Katlama Adedi - Firma Teslim Adedi. Pozitif fark: firmaya teslim edilmeyi bekleyen adet.</p><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Eleman Katlama Adet</th><th>Fark</th></tr>{comp_tr}</table></div>
     <div class="card"><h2>Son Kayıtlar</h2><table><tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Ürün</th><th>Adet</th><th>Ciro</th><th>İşçilik</th><th>Brüt</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>
@@ -390,8 +420,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
         return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
     products = rows("SELECT id,name,worker_price FROM products WHERE active=1 ORDER BY name")
     product_opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
-    like = this_month() + "%"
-    total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s AND work_date LIKE %s", (worker["id"], like))
+    total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s", (worker["id"],))
     today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
     msg = "<div class='notice'>Adet kaydedildi.</div>" if saved else ""
     if error:
@@ -402,7 +431,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     """, (worker["id"],))
     trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
     body = f"""
-    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Bu Ay Toplam Adedim</span><b>{int(total['qty'] or 0)}</b></div><div class="kpi"><span>Bu Ay Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div></div></div>
+    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Toplam Adedim</span><b>{int(total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div></div></div>
     <div class="card worker-form"><h2>Adet Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih</label><input type="date" name="work_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{product_opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div>
     <div class="card"><h2>Son Kayıtlarım</h2><table><tr><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Hak Ediş</th><th>İşlem</th></tr>{trs}</table></div>
     """
@@ -554,25 +583,27 @@ def delete_product(product_id: int):
 def deliveries(m: Optional[str] = None):
     if not m:
         m = this_month()
+    gs = general_summary()
     products = rows("SELECT id,name FROM products WHERE active=1 ORDER BY name")
     popts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
     data = rows("""
     SELECT d.*, p.name product, COALESCE(en.worker_qty,0) live_worker_qty, COALESCE(en.worker_qty,0)-d.firm_qty diff
     FROM deliveries d JOIN products p ON p.id=d.product_id
     LEFT JOIN (SELECT work_date,product_id,SUM(qty) worker_qty FROM entries GROUP BY work_date,product_id) en ON en.work_date=d.deliv_date AND en.product_id=d.product_id
-    WHERE d.deliv_date LIKE %s ORDER BY d.deliv_date DESC,d.id DESC
-    """, (m + "%",))
+    ORDER BY d.deliv_date DESC,d.id DESC LIMIT 500
+    """)
     trs = "".join([f"<tr><td>{r['id']}</td><td>{r['deliv_date']}</td><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['live_worker_qty'] or 0)}</td><td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td><td>{r['note'] or ''}</td><td><a class='btn red' href='/delete-delivery/{r['id']}' onclick=\"return confirm('Teslim kaydı silinsin mi?')\">Sil</a></td></tr>" for r in data]) or "<tr><td colspan='8' class='center small'>Bu ay teslim kaydı yok.</td></tr>"
     summary = rows("""
     SELECT p.name product, COALESCE(fd.firm_qty,0) firm_qty, COALESCE(en.worker_qty,0) worker_qty, COALESCE(en.worker_qty,0)-COALESCE(fd.firm_qty,0) diff
     FROM products p
-    LEFT JOIN (SELECT product_id,SUM(firm_qty) firm_qty FROM deliveries WHERE deliv_date LIKE %s GROUP BY product_id) fd ON fd.product_id=p.id
-    LEFT JOIN (SELECT product_id,SUM(qty) worker_qty FROM entries WHERE work_date LIKE %s GROUP BY product_id) en ON en.product_id=p.id
+    LEFT JOIN (SELECT product_id,SUM(firm_qty) firm_qty FROM deliveries GROUP BY product_id) fd ON fd.product_id=p.id
+    LEFT JOIN (SELECT product_id,SUM(qty) worker_qty FROM entries GROUP BY product_id) en ON en.product_id=p.id
     WHERE p.active=1 AND (COALESCE(fd.firm_qty,0)>0 OR COALESCE(en.worker_qty,0)>0) ORDER BY p.name
-    """, (m + "%", m + "%"))
+    """)
     sum_tr = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['worker_qty'] or 0)}</td><td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td></tr>" for r in summary]) or "<tr><td colspan='4' class='center small'>Özet yok.</td></tr>"
     body = f"""
-    <div class="card"><form method="get" action="/deliveries"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button></form></div>
+    <div class="card"><h2>Genel Toplam - Tarih Fark Etmez</h2><p class="small">Aynı tarih + aynı ürün tekrar girilse bile ayrı kayıt açılır. Aşağıdaki toplamlar tüm kayıtların genel toplamıdır.</p></div>
+    <div class="kpis"><div class="kpi"><span>Genel Firma Teslim</span><b>{int(gs['qty'])}</b></div><div class="kpi"><span>Genel Hak Ediş</span><b>{money(gs['revenue'])}</b></div><div class="kpi"><span>Genel İşçilik</span><b>{money(gs['labor'])}</b></div><div class="kpi"><span>Genel Masraf</span><b>{money(gs['expense'])}</b></div><div class="kpi"><span>Genel Net</span><b>{money(gs['net'])}</b></div></div>
     <div class="card"><h2>Firma Teslim Girişi</h2><p class="small">Burada sadece firmaya teslim edilen finiş adedi yaz. Para hesabı ana panelde bu firma teslim adedinden yapılır.</p><form method="post" action="/add-delivery"><div class="grid"><div><label>Tarih</label><input type="date" name="deliv_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{popts}</select></div><div><label>Firmaya Teslim Edilen Adet</label><input name="firm_qty" type="number" min="0" value="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="Eksik/fazla açıklaması"></div></div><br><button class="btn green">Firma Teslim Kaydet</button></form></div>
     <div class="card"><h2>Ürün Bazlı Karşılaştırma</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Eleman Katlama Adet</th><th>Fark</th></tr>{sum_tr}</table></div>
     <div class="card"><h2>Teslim Detayları</h2><table><tr><th>ID</th><th>Tarih</th><th>Ürün</th><th>Firma Adet</th><th>Eleman Toplam Adet</th><th>Fark</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>
@@ -584,14 +615,18 @@ def deliveries(m: Optional[str] = None):
 def add_delivery(deliv_date: str = Form(...), product_id: int = Form(...), firm_qty: int = Form(...), note: str = Form("")):
     try:
         datetime.strptime(deliv_date, "%Y-%m-%d")
-        firm_qty = max(0, int(firm_qty))
+        firm_qty = int(firm_qty)
+        if firm_qty <= 0:
+            return RedirectResponse("/deliveries", status_code=303)
     except Exception:
         return RedirectResponse("/deliveries", status_code=303)
-    old = one("SELECT id FROM deliveries WHERE deliv_date=%s AND product_id=%s LIMIT 1", (deliv_date, product_id))
-    if old:
-        exec_db("UPDATE deliveries SET firm_qty=%s, note=%s, created_at=%s WHERE id=%s", (firm_qty, note, now_iso(), old["id"]))
-    else:
-        exec_db("INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)", (deliv_date, None, product_id, firm_qty, 0, note, now_iso()))
+
+    # Aynı tarih + aynı ürün olsa bile yeni kayıt açılır.
+    # Böylece hiçbir teslim adedi eski kaydın üstüne yazılmaz.
+    exec_db("""
+        INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at)
+        VALUES(%s,%s,%s,%s,%s,%s,%s)
+    """, (deliv_date, None, product_id, firm_qty, 0, note, now_iso()))
     return RedirectResponse("/deliveries", status_code=303)
 
 
@@ -603,9 +638,10 @@ def delete_delivery(did: int):
 
 @app.get("/expenses", response_class=HTMLResponse)
 def expenses():
-    data = rows("SELECT * FROM expenses ORDER BY exp_date DESC,id DESC LIMIT 300")
+    total_expense = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")["total"] or 0
+    data = rows("SELECT * FROM expenses ORDER BY exp_date DESC,id DESC LIMIT 500")
     trs = "".join([f"<tr><td>{r['id']}</td><td>{r['exp_date']}</td><td>{r['category']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note'] or ''}</td><td><a class='btn red' href='/delete-expense/{r['id']}'>Sil</a></td></tr>" for r in data])
-    body = f"""<div class="card"><h2>Masraf Ekle</h2><form method="post" action="/add-expense"><div class="grid"><div><label>Tarih</label><input type="date" name="exp_date" value="{today()}" required></div><div><label>Kategori</label><input name="category" placeholder="Yemek, yol, kira..." required></div><div><label>Tutar</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Masraf Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>Tarih</th><th>Kategori</th><th>Tutar</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>"""
+    body = f"""<div class="kpis three"><div class="kpi"><span>Genel Masraf Toplamı</span><b>{money(total_expense)}</b></div></div><div class="card"><h2>Masraf Ekle</h2><form method="post" action="/add-expense"><div class="grid"><div><label>Tarih</label><input type="date" name="exp_date" value="{today()}" required></div><div><label>Kategori</label><input name="category" placeholder="Yemek, yol, kira..." required></div><div><label>Tutar</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Masraf Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>Tarih</th><th>Kategori</th><th>Tutar</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>"""
     return page("Masraflar", body)
 
 
@@ -623,11 +659,12 @@ def delete_expense(eid: int):
 
 @app.get("/payments", response_class=HTMLResponse)
 def payments():
+    total_payment = one("SELECT COALESCE(SUM(amount),0) total FROM payments")["total"] or 0
     workers = rows("SELECT id,name FROM workers WHERE active=1 ORDER BY name")
     opts = "".join([f"<option value='{w['id']}'>{w['name']}</option>" for w in workers])
     data = rows("SELECT p.id,p.pay_date,w.name worker,p.amount,COALESCE(p.note,'') note FROM payments p JOIN workers w ON w.id=p.worker_id ORDER BY p.pay_date DESC,p.id DESC LIMIT 300")
     trs = "".join([f"<tr><td>{r['id']}</td><td>{r['pay_date']}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-payment/{r['id']}'>Sil</a></td></tr>" for r in data])
-    body = f"""<div class="card"><h2>Eleman Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih</label><input type="date" name="pay_date" value="{today()}" required></div><div><label>Eleman</label><select name="worker_id">{opts}</select></div><div><label>Tutar</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Tutar</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>"""
+    body = f"""<div class="kpis three"><div class="kpi"><span>Genel Ödeme Toplamı</span><b>{money(total_payment)}</b></div></div><div class="card"><h2>Eleman Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih</label><input type="date" name="pay_date" value="{today()}" required></div><div><label>Eleman</label><select name="worker_id">{opts}</select></div><div><label>Tutar</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Tutar</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>"""
     return page("Ödemeler", body)
 
 
