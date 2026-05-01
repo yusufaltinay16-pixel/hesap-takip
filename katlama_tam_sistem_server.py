@@ -563,51 +563,105 @@ def product_off(product_id: int):
 def deliveries(m: Optional[str] = None):
     if not m:
         m = this_month()
+
     products = rows("SELECT id,name FROM products WHERE active=1 ORDER BY name")
-    workers = rows("SELECT id,name FROM workers WHERE active=1 ORDER BY name")
     popts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
-    wopts = "<option value=''>Genel / Eleman seçme</option>" + "".join([f"<option value='{w['id']}'>{w['name']}</option>" for w in workers])
+
     data = rows("""
-    SELECT d.*, p.name product, COALESCE(w.name,'Genel') worker, (d.firm_qty-d.worker_qty) diff
+    SELECT d.*, p.name product, (d.firm_qty-d.worker_qty) diff
     FROM deliveries d
     JOIN products p ON p.id=d.product_id
-    LEFT JOIN workers w ON w.id=d.worker_id
     WHERE d.deliv_date LIKE ?
     ORDER BY d.deliv_date DESC,d.id DESC
     """, (m + "%",))
+
     trs = "".join([f"""
-    <tr><td>{r['id']}</td><td>{r['deliv_date']}</td><td>{r['worker']}</td><td>{r['product']}</td>
-    <td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['worker_qty'] or 0)}</td>
-    <td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td><td>{r['note'] or ''}</td>
-    <td><a class='btn red' href='/delete-delivery/{r['id']}' onclick="return confirm('Teslim kaydı silinsin mi?')">Sil</a></td></tr>
-    """ for r in data]) or "<tr><td colspan='9' class='center small'>Bu ay teslim kaydı yok.</td></tr>"
+    <tr>
+      <td>{r['id']}</td>
+      <td>{r['deliv_date']}</td>
+      <td>{r['product']}</td>
+      <td class='right'>{int(r['firm_qty'] or 0)}</td>
+      <td class='right'>{int(r['worker_qty'] or 0)}</td>
+      <td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td>
+      <td>{r['note'] or ''}</td>
+      <td><a class='btn red' href='/delete-delivery/{r['id']}' onclick="return confirm('Teslim kaydı silinsin mi?')">Sil</a></td>
+    </tr>
+    """ for r in data]) or "<tr><td colspan='8' class='center small'>Bu ay teslim kaydı yok.</td></tr>"
+
     summary = rows("""
-    SELECT p.name product, COALESCE(SUM(d.firm_qty),0) firm_qty, COALESCE(SUM(d.worker_qty),0) worker_qty,
+    SELECT p.name product,
+           COALESCE(SUM(d.firm_qty),0) firm_qty,
+           COALESCE(SUM(d.worker_qty),0) worker_qty,
            COALESCE(SUM(d.firm_qty-d.worker_qty),0) diff
-    FROM deliveries d JOIN products p ON p.id=d.product_id
-    WHERE d.deliv_date LIKE ? GROUP BY p.id,p.name ORDER BY p.name
+    FROM deliveries d
+    JOIN products p ON p.id=d.product_id
+    WHERE d.deliv_date LIKE ?
+    GROUP BY p.id,p.name
+    ORDER BY p.name
     """, (m + "%",))
-    sum_tr = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['worker_qty'] or 0)}</td><td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td></tr>" for r in summary]) or "<tr><td colspan='4' class='center small'>Özet yok.</td></tr>"
+
+    sum_tr = "".join([f"""
+    <tr>
+      <td>{r['product']}</td>
+      <td class='right'>{int(r['firm_qty'] or 0)}</td>
+      <td class='right'>{int(r['worker_qty'] or 0)}</td>
+      <td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td>
+    </tr>
+    """ for r in summary]) or "<tr><td colspan='4' class='center small'>Özet yok.</td></tr>"
+
     body = f"""
-    <div class="card"><form method="get" action="/deliveries"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button></form></div>
-    <div class="card"><h2>Firma Teslim Girişi</h2><form method="post" action="/add-delivery"><div class="grid">
-      <div><label>Tarih</label><input name="deliv_date" value="{today()}" required></div>
-      <div><label>Eleman</label><select name="worker_id">{wopts}</select></div>
-      <div><label>Ürün</label><select name="product_id" required>{popts}</select></div>
-      <div><label>Firmaya Teslim Edilen Adet</label><input name="firm_qty" type="number" min="0" value="0" required></div>
-      <div><label>Elemanın Saydığı Adet</label><input name="worker_qty" type="number" min="0" value="0" required></div>
-      <div style="grid-column:span 5"><label>Not</label><input name="note" placeholder="Eksik/fazla açıklaması"></div>
-    </div><br><button class="btn green">Firma Teslim Kaydet</button></form></div>
-    <div class="card"><h2>Ürün Bazlı Karşılaştırma</h2><table><tr><th>Ürün</th><th>Firma Adet</th><th>Eleman Adet</th><th>Fark</th></tr>{sum_tr}</table></div>
-    <div class="card"><h2>Teslim Detayları</h2><table><tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Ürün</th><th>Firma Adet</th><th>Eleman Adet</th><th>Fark</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>
+    <div class="card">
+      <form method="get" action="/deliveries">
+        <label>Ay seç: YYYY-AA</label>
+        <input name="m" value="{m}" style="max-width:180px;display:inline-block">
+        <button class="btn green">Hesapla</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Firma Teslim Girişi</h2>
+      <p class="small">Burada sadece firmaya teslim edilen adedi yaz. Eleman adedi otomatik olarak elemanların kendi panelinden girdiği aynı tarih + aynı ürün toplamından alınır.</p>
+      <form method="post" action="/add-delivery">
+        <div class="grid">
+          <div><label>Tarih</label><input name="deliv_date" value="{today()}" required></div>
+          <div><label>Ürün</label><select name="product_id" required>{popts}</select></div>
+          <div><label>Firmaya Teslim Edilen Adet</label><input name="firm_qty" type="number" min="0" value="0" required></div>
+          <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="Eksik/fazla açıklaması"></div>
+        </div>
+        <br><button class="btn green">Firma Teslim Kaydet</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Ürün Bazlı Karşılaştırma</h2>
+      <table><tr><th>Ürün</th><th>Firma Adet</th><th>Elemanların Girdiği Toplam Adet</th><th>Fark</th></tr>{sum_tr}</table>
+    </div>
+
+    <div class="card">
+      <h2>Teslim Detayları</h2>
+      <table><tr><th>ID</th><th>Tarih</th><th>Ürün</th><th>Firma Adet</th><th>Eleman Toplam Adet</th><th>Fark</th><th>Not</th><th>İşlem</th></tr>{trs}</table>
+    </div>
     """
     return page("Firma Teslim ve Karşılaştırma", body)
 
 
 @app.post("/add-delivery")
-def add_delivery(deliv_date: str = Form(...), worker_id: str = Form(""), product_id: int = Form(...), firm_qty: int = Form(...), worker_qty: int = Form(...), note: str = Form("")):
-    wid = int(worker_id) if str(worker_id).strip() else None
-    exec_db("INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at) VALUES(?,?,?,?,?,?,?)", (deliv_date, wid, product_id, int(firm_qty), int(worker_qty), note, now_iso()))
+def add_delivery(deliv_date: str = Form(...), product_id: int = Form(...), firm_qty: int = Form(...), note: str = Form("")):
+    # Eleman adedi elle yazılmaz.
+    # Elemanların kendi telefon panelinden girdiği aynı tarih + aynı ürün toplamı otomatik alınır.
+    worker_total_row = one("""
+    SELECT COALESCE(SUM(qty),0) total
+    FROM entries
+    WHERE work_date=? AND product_id=?
+    """, (deliv_date, product_id))
+
+    worker_qty = int(worker_total_row["total"] or 0)
+
+    exec_db("""
+    INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at)
+    VALUES(?,?,?,?,?,?,?)
+    """, (deliv_date, None, product_id, int(firm_qty), worker_qty, note, now_iso()))
+
     return RedirectResponse("/deliveries", status_code=303)
 
 
