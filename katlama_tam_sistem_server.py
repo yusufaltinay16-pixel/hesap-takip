@@ -529,7 +529,7 @@ def products():
     data = rows("SELECT id,name,firm_price,worker_price,active FROM products ORDER BY active DESC,name")
     trs = "".join([f"""
     <tr><td>{r['id']}</td><td>{r['name']}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['worker_price'])}</td>
-      <td class='right'>{money((r['firm_price'] or 0)-(r['worker_price'] or 0))}</td><td>{'Aktif' if r['active'] else 'Pasif'}</td><td><a class='btn red' href='/product-off/{r['id']}'>Pasifleştir</a></td></tr>""" for r in data])
+      <td class='right'>{money((r['firm_price'] or 0)-(r['worker_price'] or 0))}</td><td>{'Aktif' if r['active'] else 'Pasif'}</td><td><a class='btn red' href='/delete-product/{r['id']}' onclick="return confirm('Bu ürün silinsin mi? Kayıtlarda kullanıldıysa sadece pasif yapılır.')">Sil</a></td></tr>""" for r in data])
     body = f"""
     <div class="card"><h2>Ürün ve Fiyatlar</h2><form method="post" action="/add-product"><div class="grid">
       <div><label>Ürün adı</label><input name="name" required></div>
@@ -541,23 +541,33 @@ def products():
     return page("Ürün / Firma Ücreti / Eleman Ücreti", body)
 
 
+def product_key(name: str):
+    # Türkçe harfleri de aynı saymak için: Şal / şal / SAL gibi farkları temizler.
+    return " ".join((name or "").strip().split()).casefold()
+
+
 @app.post("/add-product")
 def add_product(name: str = Form(...), firm_price: float = Form(...), worker_price: float = Form(...)):
     name = " ".join(name.strip().split())
     if not name:
         return RedirectResponse("/products", status_code=303)
 
-    # Aynı ürün ismi tekrar yazılırsa yeni ürün açmaz, mevcut ürünü günceller.
-    # Büyük/küçük harf farkını da dikkate almaz: eşarp / Eşarp aynı kabul edilir.
     con = db()
-    old = con.execute("SELECT id FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", (name,)).fetchone()
+    all_products = con.execute("SELECT id,name FROM products").fetchall()
+    old_id = None
 
-    if old:
+    for p in all_products:
+        if product_key(p["name"]) == product_key(name):
+            old_id = p["id"]
+            break
+
+    if old_id:
+        # Aynı isim varsa yeni satır açmaz, fiyatı günceller.
         con.execute("""
         UPDATE products
         SET name=?, firm_price=?, worker_price=?, active=1
         WHERE id=?
-        """, (name, firm_price, worker_price, old["id"]))
+        """, (name, firm_price, worker_price, old_id))
     else:
         con.execute("""
         INSERT INTO products(name, firm_price, worker_price, active, created_at)
@@ -566,6 +576,21 @@ def add_product(name: str = Form(...), firm_price: float = Form(...), worker_pri
 
     con.commit()
     con.close()
+    return RedirectResponse("/products", status_code=303)
+
+
+@app.get("/delete-product/{product_id}")
+def delete_product(product_id: int):
+    # Yanlış girilen ürünü tamamen siler.
+    # Daha önce kayıt kullanmışsa silmek yerine pasifleştirir, kayıtlar bozulmasın.
+    used1 = one("SELECT id FROM entries WHERE product_id=? LIMIT 1", (product_id,))
+    used2 = one("SELECT id FROM deliveries WHERE product_id=? LIMIT 1", (product_id,))
+
+    if used1 or used2:
+        exec_db("UPDATE products SET active=0 WHERE id=?", (product_id,))
+    else:
+        exec_db("DELETE FROM products WHERE id=?", (product_id,))
+
     return RedirectResponse("/products", status_code=303)
 
 
