@@ -202,7 +202,13 @@ h1{font-size:24px;margin:8px 0}h2{margin:8px 0 14px}a{color:white;text-decoratio
 .btn.green{background:var(--green);color:#06130b}.btn.red{background:var(--red)}.btn.gray{background:#334155}.btn.yellow{background:var(--yellow);color:#1b1100}.btn.purple{background:var(--purple)}.btn.cyan{background:var(--cyan);color:#031014}
 .card{background:rgba(18,26,45,.94);border:1px solid var(--line);border-radius:18px;padding:15px;margin:12px 0;box-shadow:0 14px 34px #0005}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 label{font-size:13px;color:var(--muted);display:block;margin-bottom:5px;font-weight:700}input,select,textarea{width:100%;padding:13px;border-radius:12px;border:1px solid var(--line);background:#0f172a;color:white;font-size:16px}
-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:14px;overflow:hidden}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{color:#cbd5e1;background:#111827}.right{text-align:right}.center{text-align:center}
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border-radius:14px;overflow:hidden;table-layout:fixed}
+th,td{border-bottom:1px solid var(--line);padding:12px 14px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+th{color:#cbd5e1;background:#111827;text-align:left;font-size:14px}
+td{font-size:15px}
+th.right,td.right{text-align:right}
+th.center,td.center{text-align:center}
+.right{text-align:right}.center{text-align:center}
 .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.kpis.three{grid-template-columns:repeat(3,1fr)}.kpi{background:linear-gradient(180deg,#111827,#0f172a);border:1px solid var(--line);border-radius:16px;padding:15px;min-height:82px}.kpi b{font-size:24px;display:block;margin-top:6px}.kpi span{color:var(--muted);font-size:13px;font-weight:700}
 .notice{background:#052e1a;border:1px solid #166534;color:#dcfce7;padding:10px;border-radius:12px;margin:10px 0}.bad{background:#3b1111;border:1px solid #7f1d1d;color:#fee2e2;padding:10px;border-radius:12px;margin:10px 0}.copy{font-size:12px;word-break:break-all;color:#dbeafe}.small{font-size:12px;color:var(--muted)}
 .worker-hero{background:linear-gradient(135deg,#172554,#0f172a 55%,#052e1a);border:1px solid #334155;border-radius:24px;padding:18px;box-shadow:0 18px 45px #0008}.worker-title{font-size:28px;font-weight:900;margin:0 0 8px}.worker-sub{color:#cbd5e1;margin-bottom:12px}.worker-form input,.worker-form select{font-size:20px;padding:16px}.worker-form button{font-size:20px;padding:16px 22px;width:100%}
@@ -374,7 +380,18 @@ def dashboard():
         <h2>Firma vs Eleman Genel Karşılaştırma</h2>
         <p class="small">Tarih fark etmeksizin tüm firma teslim kayıtları ve tüm eleman katlama adetleri karşılaştırılır.</p>
         <table>
-            <tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Eleman Katlama Adet</th><th>Fark</th></tr>
+            <colgroup>
+                <col style="width:28%">
+                <col style="width:24%">
+                <col style="width:24%">
+                <col style="width:24%">
+            </colgroup>
+            <tr>
+                <th>Ürün</th>
+                <th class="right">Firma Teslim Adet</th>
+                <th class="right">Eleman Katlama Adet</th>
+                <th class="right">Fark</th>
+            </tr>
             {comp_tr}
         </table>
     </div>
@@ -382,7 +399,30 @@ def dashboard():
     <div class="card">
         <h2>Son Eleman Kayıtları</h2>
         <table>
-            <tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Ürün</th><th>Adet</th><th>Eski Ciro</th><th>İşçilik</th><th>Eski Brüt</th><th>Not</th><th>İşlem</th></tr>
+            <colgroup>
+                <col style="width:6%">
+                <col style="width:11%">
+                <col style="width:13%">
+                <col style="width:13%">
+                <col style="width:8%">
+                <col style="width:11%">
+                <col style="width:11%">
+                <col style="width:11%">
+                <col style="width:10%">
+                <col style="width:7%">
+            </colgroup>
+            <tr>
+                <th>ID</th>
+                <th>Tarih</th>
+                <th>Eleman</th>
+                <th>Ürün</th>
+                <th class="right">Adet</th>
+                <th class="right">Eski Ciro</th>
+                <th class="right">İşçilik</th>
+                <th class="right">Eski Brüt</th>
+                <th>Not</th>
+                <th>İşlem</th>
+            </tr>
             {trs}
         </table>
         <p class="small">Not: Para hesabında firma hak edişi eleman adedinden değil, firma teslim adedinden hesaplanır.</p>
@@ -612,8 +652,36 @@ def deliveries():
         </form>
     </div>
 
-    <div class="card"><h2>Ürün Bazlı Genel Karşılaştırma</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Eleman Katlama Adet</th><th>Fark</th></tr>{sum_tr}</table></div>
-    <div class="card"><h2>Tüm Teslim Kayıtları</h2><table><tr><th>ID</th><th>Tarih</th><th>Ürün</th><th>Firma Adet</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>
+    <div class="card"><h2>Ürün Bazlı Genel Karşılaştırma</h2><table>
+<colgroup>
+    <col style="width:28%">
+    <col style="width:24%">
+    <col style="width:24%">
+    <col style="width:24%">
+</colgroup>
+<tr>
+    <th>Ürün</th>
+    <th class="right">Firma Teslim Adet</th>
+    <th class="right">Eleman Katlama Adet</th>
+    <th class="right">Fark</th>
+</tr>{sum_tr}</table></div>
+    <div class="card"><h2>Tüm Teslim Kayıtları</h2><table>
+<colgroup>
+    <col style="width:8%">
+    <col style="width:16%">
+    <col style="width:24%">
+    <col style="width:16%">
+    <col style="width:24%">
+    <col style="width:12%">
+</colgroup>
+<tr>
+    <th>ID</th>
+    <th>Tarih</th>
+    <th>Ürün</th>
+    <th class="right">Firma Adet</th>
+    <th>Not</th>
+    <th>İşlem</th>
+</tr>{trs}</table></div>
     """
     return page("Firma Teslim ve Genel Karşılaştırma", body)
 
