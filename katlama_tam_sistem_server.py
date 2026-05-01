@@ -289,15 +289,25 @@ def dashboard(m: Optional[str] = None):
 
     compare = rows("""
     SELECT p.name product,
-           COALESCE(SUM(d.firm_qty),0) firm_qty,
-           COALESCE(SUM(d.worker_qty),0) worker_qty,
-           COALESCE(SUM(d.firm_qty - d.worker_qty),0) diff
-    FROM deliveries d
-    JOIN products p ON p.id=d.product_id
-    WHERE d.deliv_date LIKE ?
-    GROUP BY p.id,p.name
+           COALESCE(fd.firm_qty,0) firm_qty,
+           COALESCE(en.worker_qty,0) worker_qty,
+           COALESCE(fd.firm_qty,0) - COALESCE(en.worker_qty,0) diff
+    FROM products p
+    LEFT JOIN (
+        SELECT product_id, SUM(firm_qty) firm_qty
+        FROM deliveries
+        WHERE deliv_date LIKE ?
+        GROUP BY product_id
+    ) fd ON fd.product_id=p.id
+    LEFT JOIN (
+        SELECT product_id, SUM(qty) worker_qty
+        FROM entries
+        WHERE work_date LIKE ?
+        GROUP BY product_id
+    ) en ON en.product_id=p.id
+    WHERE p.active=1 AND (COALESCE(fd.firm_qty,0) > 0 OR COALESCE(en.worker_qty,0) > 0)
     ORDER BY p.name
-    """, (m + "%",))
+    """, (m + "%", m + "%"))
     comp_tr = "".join([f"""
     <tr>
       <td>{r['product']}</td>
@@ -631,15 +641,25 @@ def deliveries(m: Optional[str] = None):
 
     summary = rows("""
     SELECT p.name product,
-           COALESCE(SUM(d.firm_qty),0) firm_qty,
-           COALESCE(SUM(d.worker_qty),0) worker_qty,
-           COALESCE(SUM(d.firm_qty-d.worker_qty),0) diff
-    FROM deliveries d
-    JOIN products p ON p.id=d.product_id
-    WHERE d.deliv_date LIKE ?
-    GROUP BY p.id,p.name
+           COALESCE(fd.firm_qty,0) firm_qty,
+           COALESCE(en.worker_qty,0) worker_qty,
+           COALESCE(fd.firm_qty,0) - COALESCE(en.worker_qty,0) diff
+    FROM products p
+    LEFT JOIN (
+        SELECT product_id, SUM(firm_qty) firm_qty
+        FROM deliveries
+        WHERE deliv_date LIKE ?
+        GROUP BY product_id
+    ) fd ON fd.product_id=p.id
+    LEFT JOIN (
+        SELECT product_id, SUM(qty) worker_qty
+        FROM entries
+        WHERE work_date LIKE ?
+        GROUP BY product_id
+    ) en ON en.product_id=p.id
+    WHERE p.active=1 AND (COALESCE(fd.firm_qty,0) > 0 OR COALESCE(en.worker_qty,0) > 0)
     ORDER BY p.name
-    """, (m + "%",))
+    """, (m + "%", m + "%"))
 
     sum_tr = "".join([f"""
     <tr>
@@ -688,20 +708,29 @@ def deliveries(m: Optional[str] = None):
 
 @app.post("/add-delivery")
 def add_delivery(deliv_date: str = Form(...), product_id: int = Form(...), firm_qty: int = Form(...), note: str = Form("")):
-    # Eleman adedi elle yazılmaz.
-    # Elemanların kendi telefon panelinden girdiği aynı tarih + aynı ürün toplamı otomatik alınır.
-    worker_total_row = one("""
-    SELECT COALESCE(SUM(qty),0) total
-    FROM entries
-    WHERE work_date=? AND product_id=?
-    """, (deliv_date, product_id))
+    # Firma teslim kaydı sadece firma adetini tutar.
+    # Eleman toplamı raporlarda her zaman entries tablosundan canlı hesaplanır.
+    try:
+        datetime.strptime(deliv_date, "%Y-%m-%d")
+        firm_qty = int(firm_qty)
+        if firm_qty < 0:
+            firm_qty = 0
+    except Exception:
+        return RedirectResponse("/deliveries", status_code=303)
 
-    worker_qty = int(worker_total_row["total"] or 0)
+    old = one("SELECT id FROM deliveries WHERE deliv_date=? AND product_id=? LIMIT 1", (deliv_date, product_id))
 
-    exec_db("""
-    INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at)
-    VALUES(?,?,?,?,?,?,?)
-    """, (deliv_date, None, product_id, int(firm_qty), worker_qty, note, now_iso()))
+    if old:
+        exec_db("""
+        UPDATE deliveries
+        SET firm_qty=?, note=?, created_at=?
+        WHERE id=?
+        """, (firm_qty, note, now_iso(), old["id"]))
+    else:
+        exec_db("""
+        INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at)
+        VALUES(?,?,?,?,?,?,?)
+        """, (deliv_date, None, product_id, firm_qty, 0, note, now_iso()))
 
     return RedirectResponse("/deliveries", status_code=303)
 
