@@ -847,8 +847,8 @@ def partners(m: Optional[str] = None):
         m = this_month()
 
     sm = month_summary(m)
-    net_kar = sm["net"] or 0
-    ortak_pay = net_kar / 3
+    net_kar = float(sm["net"] or 0)
+    ortak_pay = net_kar / 3.0
 
     partners_list = rows("""
     SELECT id,name FROM partners
@@ -870,6 +870,7 @@ def partners(m: Optional[str] = None):
             FROM partner_advances
             WHERE partner_id=%s AND adv_date LIKE %s
         """, (p["id"], m + "%"))["total"] or 0
+        adv = float(adv or 0)
 
         kalan = ortak_pay - adv
         partner_rows += (
