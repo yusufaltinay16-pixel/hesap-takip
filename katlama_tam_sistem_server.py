@@ -164,6 +164,26 @@ def init_db():
     """)
 
     c.execute("""
+    CREATE TABLE IF NOT EXISTS partners(
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS partner_advances(
+        id SERIAL PRIMARY KEY,
+        adv_date TEXT NOT NULL,
+        partner_id INTEGER NOT NULL REFERENCES partners(id),
+        amount DOUBLE PRECISION NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    c.execute("""
     CREATE TABLE IF NOT EXISTS expenses(
         id SERIAL PRIMARY KEY,
         exp_date TEXT NOT NULL,
@@ -193,6 +213,13 @@ def init_db():
         VALUES(%s,%s,%s,%s,%s)
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
+
+    for pname in ["Ortak 1", "Ortak 2", "Ortak 3"]:
+        c.execute("""
+        INSERT INTO partners(name, active, created_at)
+        VALUES(%s,%s,%s)
+        ON CONFLICT(name) DO NOTHING
+        """, (pname, 1, now_iso()))
 
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' ")
     for r in c.fetchall():
@@ -233,7 +260,7 @@ def page(title, body, nav=True):
     nav_html = ""
     if nav:
         nav_html = """<div class="nav">
-<a href="/dashboard">Ana Panel</a><a href="/workers">Eleman Linkleri</a><a href="/products">Ürün/Fiyat</a><a href="/deliveries">Firma Teslim</a><a href="/expenses">Masraflar</a><a href="/advances">Avanslar</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a>
+<a href="/dashboard">Ana Panel</a><a href="/workers">Eleman Linkleri</a><a href="/products">Ürün/Fiyat</a><a href="/deliveries">Firma Teslim</a><a href="/expenses">Masraflar</a><a href="/partners">Ortaklar Hesap</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a>
 </div>"""
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{title}</h1>{nav_html}</div>{body}</div></body></html>"""
 
@@ -746,6 +773,176 @@ def delete_expense(eid: int):
     exec_db("DELETE FROM expenses WHERE id=%s", (eid,))
     return RedirectResponse("/expenses", status_code=303)
 
+
+
+
+@app.get("/partners", response_class=HTMLResponse)
+def partners(m: Optional[str] = None):
+    if not m:
+        m = this_month()
+
+    sm = month_summary(m)
+    net_kar = sm["net"] or 0
+    ortak_pay = net_kar / 3
+
+    partners_list = rows("SELECT id,name FROM partners WHERE active=1 ORDER BY id LIMIT 3")
+    opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in partners_list])
+
+    # Eğer ortak adı değiştirmek istersen bu tabloda isim güncellenir.
+    partner_rows = ""
+    for p in partners_list:
+        adv = one("""
+            SELECT COALESCE(SUM(amount),0) total
+            FROM partner_advances
+            WHERE partner_id=%s AND adv_date LIKE %s
+        """, (p["id"], m + "%"))["total"] or 0
+
+        kalan = ortak_pay - adv
+        partner_rows += (
+            f"<tr>"
+            f"<td>{p['name']}</td>"
+            f"<td class='right'>{money(ortak_pay)}</td>"
+            f"<td class='right'>{money(adv)}</td>"
+            f"<td class='right'>{money(kalan)}</td>"
+            f"</tr>"
+        )
+
+    adv_data = rows("""
+        SELECT pa.id,pa.adv_date,p.name partner,pa.amount,COALESCE(pa.note,'') note
+        FROM partner_advances pa
+        JOIN partners p ON p.id=pa.partner_id
+        WHERE pa.adv_date LIKE %s
+        ORDER BY pa.adv_date DESC,pa.id DESC
+        LIMIT 300
+    """, (m + "%",))
+
+    adv_rows = "".join([
+        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
+        for r in adv_data
+    ]) or "<tr><td colspan='6' class='center small'>Bu ay ortak avansı yok.</td></tr>"
+
+    body = f"""
+    <div class="card">
+        <form method="get" action="/partners">
+            <label>Ay seç: YYYY-AA</label>
+            <input name="m" value="{m}" style="max-width:180px;display:inline-block">
+            <button class="btn green">Hesapla</button>
+        </form>
+    </div>
+
+    <div class="kpis three">
+        <div class="kpi"><span>Net Kalan Toplam Kar</span><b>{money(net_kar)}</b></div>
+        <div class="kpi"><span>Ortak Sayısı</span><b>3</b></div>
+        <div class="kpi"><span>Kişi Başı Pay</span><b>{money(ortak_pay)}</b></div>
+    </div>
+
+    <div class="card">
+        <h2>Ortak Avansı Gir</h2>
+        <p class="small">Ortak ay içinde avans aldıysa burada yaz. Ay sonu ortak payından düşer.</p>
+        <form method="post" action="/add-partner-advance">
+            <input type="hidden" name="m" value="{m}">
+            <div class="grid">
+                <div><label>Tarih</label><input name="adv_date" value="{today()}" required></div>
+                <div><label>Ortak</label><select name="partner_id" required>{opts}</select></div>
+                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div>
+                <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div>
+            </div>
+            <br><button class="btn green">Ortak Avansı Kaydet</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Ortaklar Hesap Özeti</h2>
+        <table>
+            <colgroup>
+                <col style="width:25%">
+                <col style="width:25%">
+                <col style="width:25%">
+                <col style="width:25%">
+            </colgroup>
+            <tr>
+                <th>Ortak</th>
+                <th class="right">Kar Payı</th>
+                <th class="right">Ay İçinde Aldığı Avans</th>
+                <th class="right">Net Kalan</th>
+            </tr>
+            {partner_rows}
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Bu Ay Ortak Avans Kayıtları</h2>
+        <table>
+            <colgroup>
+                <col style="width:8%">
+                <col style="width:16%">
+                <col style="width:22%">
+                <col style="width:18%">
+                <col style="width:24%">
+                <col style="width:12%">
+            </colgroup>
+            <tr>
+                <th>ID</th>
+                <th>Tarih</th>
+                <th>Ortak</th>
+                <th class="right">Avans</th>
+                <th>Not</th>
+                <th>İşlem</th>
+            </tr>
+            {adv_rows}
+        </table>
+    </div>
+    """
+    return page("Ortaklar Hesap", body)
+
+
+@app.post("/add-partner-advance")
+def add_partner_advance(
+    adv_date: str = Form(...),
+    partner_id: int = Form(...),
+    amount: float = Form(...),
+    note: str = Form(""),
+    m: str = Form("")
+):
+    try:
+        datetime.strptime(adv_date, "%Y-%m-%d")
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError()
+    except Exception:
+        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+    exec_db("""
+        INSERT INTO partner_advances(adv_date,partner_id,amount,note,created_at)
+        VALUES(%s,%s,%s,%s,%s)
+    """, (adv_date, partner_id, amount, note, now_iso()))
+
+    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
+
+
+@app.get("/delete-partner-advance/{aid}")
+def delete_partner_advance(aid: int, m: Optional[str] = None):
+    exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,))
+    return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+
+@app.get("/partner-name-edit", response_class=HTMLResponse)
+def partner_name_edit():
+    data = rows("SELECT id,name FROM partners ORDER BY id LIMIT 3")
+    trs = "".join([
+        f"<tr><td>{r['id']}</td><td><form method='post' action='/partner-name-edit' style='display:flex;gap:8px'><input type='hidden' name='partner_id' value='{r['id']}'><input name='name' value='{r['name']}' required><button class='btn green'>Kaydet</button></form></td></tr>"
+        for r in data
+    ])
+    body = f"<div class='card'><h2>Ortak İsimlerini Düzenle</h2><table><tr><th>ID</th><th>Ortak Adı</th></tr>{trs}</table></div>"
+    return page("Ortak İsimleri", body)
+
+
+@app.post("/partner-name-edit")
+def partner_name_edit_save(partner_id: int = Form(...), name: str = Form(...)):
+    name = " ".join(name.strip().split())
+    if name:
+        exec_db("UPDATE partners SET name=%s WHERE id=%s", (name, partner_id))
+    return RedirectResponse("/partner-name-edit", status_code=303)
 
 
 @app.get("/advances", response_class=HTMLResponse)
