@@ -833,6 +833,7 @@ def partners(m: Optional[str] = None):
 
     # Eğer ortak adı değiştirmek istersen bu tabloda isim güncellenir.
     partner_rows = ""
+    partner_name_rows = ""
     for p in partners_list:
         adv = one("""
             SELECT COALESCE(SUM(amount),0) total
@@ -850,6 +851,20 @@ def partners(m: Optional[str] = None):
             f"</tr>"
         )
 
+        partner_name_rows += (
+            f"<tr>"
+            f"<td>{p['id']}</td>"
+            f"<td>"
+            f"<form method='post' action='/update-partner-name' style='display:flex;gap:8px;align-items:center'>"
+            f"<input type='hidden' name='m' value='{m}'>"
+            f"<input type='hidden' name='partner_id' value='{p['id']}'>"
+            f"<input name='name' value='{p['name']}' required>"
+            f"<button class='btn green'>Güncelle</button>"
+            f"</form>"
+            f"</td>"
+            f"</tr>"
+        )
+
     adv_data = rows("""
         SELECT pa.id,pa.adv_date,p.name partner,pa.amount,COALESCE(pa.note,'') note
         FROM partner_advances pa
@@ -860,7 +875,7 @@ def partners(m: Optional[str] = None):
     """, (m + "%",))
 
     adv_rows = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
+        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn yellow' href='/edit-partner-advance/{r['id']}?m={m}'>Güncelle</a> <a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
         for r in adv_data
     ]) or "<tr><td colspan='6' class='center small'>Bu ay ortak avansı yok.</td></tr>"
 
@@ -877,6 +892,22 @@ def partners(m: Optional[str] = None):
         <div class="kpi"><span>Net Kalan Toplam Kar</span><b>{money(net_kar)}</b></div>
         <div class="kpi"><span>Ortak Sayısı</span><b>3</b></div>
         <div class="kpi"><span>Kişi Başı Pay</span><b>{money(ortak_pay)}</b></div>
+    </div>
+
+    <div class="card">
+        <h2>Ortak İsimlerini Değiştir</h2>
+        <p class="small">Buradan Ortak 1 / Ortak 2 / Ortak 3 isimlerini değiştirebilirsin.</p>
+        <table>
+            <colgroup>
+                <col style="width:10%">
+                <col style="width:90%">
+            </colgroup>
+            <tr>
+                <th>ID</th>
+                <th>Ortak İsmi</th>
+            </tr>
+            {partner_name_rows}
+        </table>
     </div>
 
     <div class="card">
@@ -922,7 +953,7 @@ def partners(m: Optional[str] = None):
                 <col style="width:22%">
                 <col style="width:18%">
                 <col style="width:24%">
-                <col style="width:12%">
+                <col style="width:16%">
             </colgroup>
             <tr>
                 <th>ID</th>
@@ -960,6 +991,85 @@ def add_partner_advance(
         INSERT INTO partner_advances(adv_date,partner_id,amount,note,created_at)
         VALUES(%s,%s,%s,%s,%s)
     """, (adv_date, partner_id, amount, note, now_iso()))
+
+    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
+
+
+
+@app.post("/update-partner-name")
+def update_partner_name(
+    partner_id: int = Form(...),
+    name: str = Form(...),
+    m: str = Form("")
+):
+    ensure_partner_tables()
+    name = " ".join(name.strip().split())
+    if name:
+        exec_db("UPDATE partners SET name=%s WHERE id=%s", (name, partner_id))
+    return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+
+@app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
+def edit_partner_advance(aid: int, m: Optional[str] = None):
+    ensure_partner_tables()
+    rec = one("""
+        SELECT *
+        FROM partner_advances
+        WHERE id=%s
+    """, (aid,))
+
+    if not rec:
+        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+    partners_list = rows("SELECT id,name FROM partners WHERE active=1 ORDER BY id LIMIT 3")
+    opts = "".join([
+        f"<option value='{p['id']}' {'selected' if p['id'] == rec['partner_id'] else ''}>{p['name']}</option>"
+        for p in partners_list
+    ])
+
+    body = f"""
+    <div class="card">
+        <h2>Ortak Avansı Güncelle</h2>
+        <form method="post" action="/edit-partner-advance/{aid}">
+            <input type="hidden" name="m" value="{m or rec['adv_date'][:7]}">
+            <div class="grid">
+                <div><label>Tarih</label><input name="adv_date" value="{rec['adv_date']}" required></div>
+                <div><label>Ortak</label><select name="partner_id" required>{opts}</select></div>
+                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" value="{rec['amount']}" required></div>
+                <div style="grid-column:span 2"><label>Not</label><input name="note" value="{rec['note'] or ''}"></div>
+            </div>
+            <br>
+            <button class="btn green">Güncellemeyi Kaydet</button>
+            <a class="btn gray" href="/partners?m={m or rec['adv_date'][:7]}">Geri Dön</a>
+        </form>
+    </div>
+    """
+    return page("Ortak Avansı Güncelle", body)
+
+
+@app.post("/edit-partner-advance/{aid}")
+def edit_partner_advance_save(
+    aid: int,
+    adv_date: str = Form(...),
+    partner_id: int = Form(...),
+    amount: float = Form(...),
+    note: str = Form(""),
+    m: str = Form("")
+):
+    ensure_partner_tables()
+    try:
+        datetime.strptime(adv_date, "%Y-%m-%d")
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError()
+    except Exception:
+        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+    exec_db("""
+        UPDATE partner_advances
+        SET adv_date=%s, partner_id=%s, amount=%s, note=%s
+        WHERE id=%s
+    """, (adv_date, partner_id, amount, note, aid))
 
     return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
 
