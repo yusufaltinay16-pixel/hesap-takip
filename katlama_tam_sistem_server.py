@@ -214,22 +214,12 @@ def init_db():
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
 
-    fixed_partners = ["yusuf altınay", "mine ulu", "emine erol"]
-    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
-    existing_partners = c.fetchall()
-
-    if len(existing_partners) < 3:
-        for pname in fixed_partners:
-            c.execute("""
-            INSERT INTO partners(name, active, created_at)
-            VALUES(%s,%s,%s)
-            ON CONFLICT(name) DO NOTHING
-            """, (pname, 1, now_iso()))
-
-    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
-    first_three_partners = c.fetchall()
-    for idx, r in enumerate(first_three_partners):
-        c.execute("UPDATE partners SET name=%s, active=1 WHERE id=%s", (fixed_partners[idx], r["id"]))
+    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
+        c.execute("""
+        INSERT INTO partners(name, active, created_at)
+        VALUES(%s,%s,%s)
+        ON CONFLICT(name) DO NOTHING
+        """, (pname, 1, now_iso()))
 
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' ")
     for r in c.fetchall():
@@ -238,62 +228,6 @@ def init_db():
     con.commit()
     c.close()
     con.close()
-
-
-
-def ensure_partner_tables():
-    """
-    Ortaklar tablosu Render/Supabase tarafında yoksa otomatik oluşturur.
-    Böylece /partner-name-edit sayfası Internal Server Error vermez.
-    """
-    con = db()
-    c = con.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS partners(
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS partner_advances(
-        id SERIAL PRIMARY KEY,
-        adv_date TEXT NOT NULL,
-        partner_id INTEGER NOT NULL REFERENCES partners(id),
-        amount DOUBLE PRECISION NOT NULL,
-        note TEXT,
-        created_at TEXT NOT NULL
-    )
-    """)
-
-    fixed_partners = ["yusuf altınay", "mine ulu", "emine erol"]
-
-    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
-    existing = c.fetchall()
-
-    if len(existing) < 3:
-        for pname in fixed_partners:
-            c.execute("""
-            INSERT INTO partners(name, active, created_at)
-            VALUES(%s,%s,%s)
-            ON CONFLICT(name) DO NOTHING
-            """, (pname, 1, now_iso()))
-
-    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
-    first_three = c.fetchall()
-
-    for idx, r in enumerate(first_three):
-        c.execute("""
-        UPDATE partners SET name=%s, active=1 WHERE id=%s
-        """, (fixed_partners[idx], r["id"]))
-
-    con.commit()
-    c.close()
-    con.close()
-
 
 
 CSS = """
@@ -844,7 +778,6 @@ def delete_expense(eid: int):
 
 @app.get("/partners", response_class=HTMLResponse)
 def partners(m: Optional[str] = None):
-    ensure_partner_tables()
     if not m:
         m = this_month()
 
@@ -884,7 +817,7 @@ def partners(m: Optional[str] = None):
     """, (m + "%",))
 
     adv_rows = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn yellow' href='/edit-partner-advance/{r['id']}?m={m}'>Güncelle</a> <a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
+        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
         for r in adv_data
     ]) or "<tr><td colspan='6' class='center small'>Bu ay ortak avansı yok.</td></tr>"
 
@@ -946,7 +879,7 @@ def partners(m: Optional[str] = None):
                 <col style="width:22%">
                 <col style="width:18%">
                 <col style="width:24%">
-                <col style="width:16%">
+                <col style="width:12%">
             </colgroup>
             <tr>
                 <th>ID</th>
@@ -971,7 +904,6 @@ def add_partner_advance(
     note: str = Form(""),
     m: str = Form("")
 ):
-    ensure_partner_tables()
     try:
         datetime.strptime(adv_date, "%Y-%m-%d")
         amount = float(amount)
@@ -988,89 +920,12 @@ def add_partner_advance(
     return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
 
 
-
-@app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
-def edit_partner_advance_page(aid: int, m: Optional[str] = None):
-    ensure_partner_tables()
-
-    rec = one("""
-        SELECT * FROM partner_advances WHERE id=%s
-    """, (aid,))
-
-    if not rec:
-        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-    partners_list = rows("SELECT id,name FROM partners WHERE active=1 ORDER BY id LIMIT 3")
-    opts = "".join([
-        f"<option value='{p['id']}' {'selected' if p['id'] == rec['partner_id'] else ''}>{p['name']}</option>"
-        for p in partners_list
-    ])
-
-    body = f"""
-    <div class="card">
-        <h2>Ortak Avans Güncelle</h2>
-        <form method="post" action="/edit-partner-advance/{aid}">
-            <input type="hidden" name="m" value="{m or rec['adv_date'][:7]}">
-            <div class="grid">
-                <div><label>Tarih</label><input name="adv_date" value="{rec['adv_date']}" required></div>
-                <div><label>Ortak</label><select name="partner_id" required>{opts}</select></div>
-                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" value="{rec['amount']}" required></div>
-                <div style="grid-column:span 2"><label>Not</label><input name="note" value="{rec['note'] or ''}"></div>
-            </div>
-            <br>
-            <button class="btn green">Güncellemeyi Kaydet</button>
-            <a class="btn gray" href="/partners?m={m or rec['adv_date'][:7]}">Geri Dön</a>
-        </form>
-    </div>
-    """
-    return page("Ortak Avans Güncelle", body)
-
-
-@app.post("/edit-partner-advance/{aid}")
-def edit_partner_advance_save(
-    aid: int,
-    adv_date: str = Form(...),
-    partner_id: int = Form(...),
-    amount: float = Form(...),
-    note: str = Form(""),
-    m: str = Form("")
-):
-    ensure_partner_tables()
-
-    try:
-        datetime.strptime(adv_date, "%Y-%m-%d")
-        amount = float(amount)
-        if amount <= 0:
-            raise ValueError()
-    except Exception:
-        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-    exec_db("""
-        UPDATE partner_advances
-        SET adv_date=%s, partner_id=%s, amount=%s, note=%s
-        WHERE id=%s
-    """, (adv_date, partner_id, amount, note, aid))
-
-    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
-
-
 @app.get("/delete-partner-advance/{aid}")
 def delete_partner_advance(aid: int, m: Optional[str] = None):
-    ensure_partner_tables()
     exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,))
     return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
 
 
-@app.get("/partner-name-edit", response_class=HTMLResponse)
-def partner_name_edit():
-    ensure_partner_tables()
-    return RedirectResponse("/partners", status_code=303)
-
-
-@app.post("/partner-name-edit")
-def partner_name_edit_save(partner_id: int = Form(...), name: str = Form(...)):
-    ensure_partner_tables()
-    return RedirectResponse("/partners", status_code=303)
 
 
 @app.get("/advances", response_class=HTMLResponse)
