@@ -214,12 +214,24 @@ def init_db():
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
 
+    # Ortak isimleri sabit. Eski Ortak 1/2/3 kayıtları varsa veriyi bozmadan isimlerini değiştirir.
+    for old_name, new_name in [("Ortak 1", "yusuf altınay"), ("Ortak 2", "mine ulu"), ("Ortak 3", "emine erol")]:
+        c.execute("SELECT id FROM partners WHERE name=%s LIMIT 1", (new_name,))
+        existing_new = c.fetchone()
+        if not existing_new:
+            c.execute("UPDATE partners SET name=%s, active=1 WHERE name=%s", (new_name, old_name))
+
     for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
         c.execute("""
         INSERT INTO partners(name, active, created_at)
         VALUES(%s,%s,%s)
         ON CONFLICT(name) DO NOTHING
         """, (pname, 1, now_iso()))
+
+    c.execute("""
+    UPDATE partners SET active=0
+    WHERE name NOT IN ('yusuf altınay','mine ulu','emine erol')
+    """)
 
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' ")
     for r in c.fetchall():
@@ -785,7 +797,16 @@ def partners(m: Optional[str] = None):
     net_kar = sm["net"] or 0
     ortak_pay = net_kar / 3
 
-    partners_list = rows("SELECT id,name FROM partners WHERE active=1 ORDER BY id LIMIT 3")
+    partners_list = rows("""
+    SELECT id,name FROM partners
+    WHERE active=1 AND name IN ('yusuf altınay','mine ulu','emine erol')
+    ORDER BY CASE name
+        WHEN 'yusuf altınay' THEN 1
+        WHEN 'mine ulu' THEN 2
+        WHEN 'emine erol' THEN 3
+        ELSE 4
+    END
+    """)
     opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in partners_list])
 
     # Eğer ortak adı değiştirmek istersen bu tabloda isim güncellenir.
@@ -817,7 +838,7 @@ def partners(m: Optional[str] = None):
     """, (m + "%",))
 
     adv_rows = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
+        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn yellow' href='/edit-partner-advance/{r['id']}?m={m}'>Güncelle</a> <a class='btn red' href='/delete-partner-advance/{r['id']}?m={m}' onclick=\"return confirm('Ortak avansı silinsin mi?')\">Sil</a></td></tr>"
         for r in adv_data
     ]) or "<tr><td colspan='6' class='center small'>Bu ay ortak avansı yok.</td></tr>"
 
@@ -879,7 +900,7 @@ def partners(m: Optional[str] = None):
                 <col style="width:22%">
                 <col style="width:18%">
                 <col style="width:24%">
-                <col style="width:12%">
+                <col style="width:16%">
             </colgroup>
             <tr>
                 <th>ID</th>
@@ -917,6 +938,59 @@ def add_partner_advance(
         VALUES(%s,%s,%s,%s,%s)
     """, (adv_date, partner_id, amount, note, now_iso()))
 
+    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
+
+
+@app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
+def edit_partner_advance_page(aid: int, m: Optional[str] = None):
+    rec = one("SELECT * FROM partner_advances WHERE id=%s", (aid,))
+    if not rec:
+        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+    partners_list = rows("""
+    SELECT id,name FROM partners
+    WHERE active=1 AND name IN ('yusuf altınay','mine ulu','emine erol')
+    ORDER BY CASE name
+        WHEN 'yusuf altınay' THEN 1
+        WHEN 'mine ulu' THEN 2
+        WHEN 'emine erol' THEN 3
+        ELSE 4
+    END
+    """)
+    opts = "".join([f"<option value='{p['id']}' {'selected' if p['id'] == rec['partner_id'] else ''}>{p['name']}</option>" for p in partners_list])
+
+    body = f"""
+    <div class="card">
+        <h2>Ortak Avans Güncelle</h2>
+        <form method="post" action="/edit-partner-advance/{aid}">
+            <input type="hidden" name="m" value="{m or rec['adv_date'][:7]}">
+            <div class="grid">
+                <div><label>Tarih</label><input name="adv_date" value="{rec['adv_date']}" required></div>
+                <div><label>Ortak</label><select name="partner_id" required>{opts}</select></div>
+                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" value="{rec['amount']}" required></div>
+                <div style="grid-column:span 2"><label>Not</label><input name="note" value="{rec['note'] or ''}"></div>
+            </div>
+            <br><button class="btn green">Güncellemeyi Kaydet</button> <a class="btn gray" href="/partners?m={m or rec['adv_date'][:7]}">Geri Dön</a>
+        </form>
+    </div>
+    """
+    return page("Ortak Avans Güncelle", body)
+
+
+@app.post("/edit-partner-advance/{aid}")
+def edit_partner_advance_save(aid: int, adv_date: str = Form(...), partner_id: int = Form(...), amount: float = Form(...), note: str = Form(""), m: str = Form("")):
+    try:
+        datetime.strptime(adv_date, "%Y-%m-%d")
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError()
+    except Exception:
+        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
+
+    exec_db("""
+    UPDATE partner_advances SET adv_date=%s, partner_id=%s, amount=%s, note=%s
+    WHERE id=%s
+    """, (adv_date, partner_id, amount, note, aid))
     return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
 
 
