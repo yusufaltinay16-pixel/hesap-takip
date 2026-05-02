@@ -242,6 +242,57 @@ def init_db():
     con.close()
 
 
+
+def ensure_fixed_partners():
+    """
+    Ortaklar sayfası açılmadan önce tabloları garanti oluşturur.
+    Ortak isimleri sabittir:
+    yusuf altınay, mine ulu, emine erol
+    """
+    con = db()
+    c = con.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS partners(
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS partner_advances(
+        id SERIAL PRIMARY KEY,
+        adv_date TEXT NOT NULL,
+        partner_id INTEGER NOT NULL REFERENCES partners(id),
+        amount DOUBLE PRECISION NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    fixed = ["yusuf altınay", "mine ulu", "emine erol"]
+
+    for pname in fixed:
+        c.execute("""
+        INSERT INTO partners(name, active, created_at)
+        VALUES(%s,%s,%s)
+        ON CONFLICT(name) DO UPDATE SET active=1
+        """, (pname, 1, now_iso()))
+
+    c.execute("""
+    UPDATE partners
+    SET active=0
+    WHERE name NOT IN ('yusuf altınay','mine ulu','emine erol')
+    """)
+
+    con.commit()
+    c.close()
+    con.close()
+
+
+
 CSS = """
 <style>
 :root{--bg:#08111f;--card:#121a2d;--card2:#0f172a;--line:#25314a;--text:#f8fafc;--muted:#aab3c5;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--yellow:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4}
@@ -280,6 +331,7 @@ def page(title, body, nav=True):
 @app.on_event("startup")
 def startup():
     init_db()
+    ensure_fixed_partners()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -790,6 +842,7 @@ def delete_expense(eid: int):
 
 @app.get("/partners", response_class=HTMLResponse)
 def partners(m: Optional[str] = None):
+    ensure_fixed_partners()
     if not m:
         m = this_month()
 
@@ -925,6 +978,8 @@ def add_partner_advance(
     note: str = Form(""),
     m: str = Form("")
 ):
+    ensure_fixed_partners()
+    ensure_fixed_partners()
     try:
         datetime.strptime(adv_date, "%Y-%m-%d")
         amount = float(amount)
@@ -943,6 +998,7 @@ def add_partner_advance(
 
 @app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
 def edit_partner_advance_page(aid: int, m: Optional[str] = None):
+    ensure_fixed_partners()
     rec = one("SELECT * FROM partner_advances WHERE id=%s", (aid,))
     if not rec:
         return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
@@ -996,6 +1052,7 @@ def edit_partner_advance_save(aid: int, adv_date: str = Form(...), partner_id: i
 
 @app.get("/delete-partner-advance/{aid}")
 def delete_partner_advance(aid: int, m: Optional[str] = None):
+    ensure_fixed_partners()
     exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,))
     return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
 
