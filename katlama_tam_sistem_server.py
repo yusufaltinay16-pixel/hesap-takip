@@ -214,12 +214,22 @@ def init_db():
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
 
-    for pname in ["Ortak 1", "Ortak 2", "Ortak 3"]:
-        c.execute("""
-        INSERT INTO partners(name, active, created_at)
-        VALUES(%s,%s,%s)
-        ON CONFLICT(name) DO NOTHING
-        """, (pname, 1, now_iso()))
+    fixed_partners = ["yusuf altınay", "mine ulu", "emine erol"]
+    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
+    existing_partners = c.fetchall()
+
+    if len(existing_partners) < 3:
+        for pname in fixed_partners:
+            c.execute("""
+            INSERT INTO partners(name, active, created_at)
+            VALUES(%s,%s,%s)
+            ON CONFLICT(name) DO NOTHING
+            """, (pname, 1, now_iso()))
+
+    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
+    first_three_partners = c.fetchall()
+    for idx, r in enumerate(first_three_partners):
+        c.execute("UPDATE partners SET name=%s, active=1 WHERE id=%s", (fixed_partners[idx], r["id"]))
 
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' ")
     for r in c.fetchall():
@@ -259,12 +269,26 @@ def ensure_partner_tables():
     )
     """)
 
-    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
+    fixed_partners = ["yusuf altınay", "mine ulu", "emine erol"]
+
+    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
+    existing = c.fetchall()
+
+    if len(existing) < 3:
+        for pname in fixed_partners:
+            c.execute("""
+            INSERT INTO partners(name, active, created_at)
+            VALUES(%s,%s,%s)
+            ON CONFLICT(name) DO NOTHING
+            """, (pname, 1, now_iso()))
+
+    c.execute("SELECT id FROM partners ORDER BY id LIMIT 3")
+    first_three = c.fetchall()
+
+    for idx, r in enumerate(first_three):
         c.execute("""
-        INSERT INTO partners(name, active, created_at)
-        VALUES(%s,%s,%s)
-        ON CONFLICT(name) DO NOTHING
-        """, (pname, 1, now_iso()))
+        UPDATE partners SET name=%s, active=1 WHERE id=%s
+        """, (fixed_partners[idx], r["id"]))
 
     con.commit()
     c.close()
@@ -833,7 +857,6 @@ def partners(m: Optional[str] = None):
 
     # Eğer ortak adı değiştirmek istersen bu tabloda isim güncellenir.
     partner_rows = ""
-    partner_name_rows = ""
     for p in partners_list:
         adv = one("""
             SELECT COALESCE(SUM(amount),0) total
@@ -848,20 +871,6 @@ def partners(m: Optional[str] = None):
             f"<td class='right'>{money(ortak_pay)}</td>"
             f"<td class='right'>{money(adv)}</td>"
             f"<td class='right'>{money(kalan)}</td>"
-            f"</tr>"
-        )
-
-        partner_name_rows += (
-            f"<tr>"
-            f"<td>{p['id']}</td>"
-            f"<td>"
-            f"<form method='post' action='/update-partner-name' style='display:flex;gap:8px;align-items:center'>"
-            f"<input type='hidden' name='m' value='{m}'>"
-            f"<input type='hidden' name='partner_id' value='{p['id']}'>"
-            f"<input name='name' value='{p['name']}' required>"
-            f"<button class='btn green'>Güncelle</button>"
-            f"</form>"
-            f"</td>"
             f"</tr>"
         )
 
@@ -892,22 +901,6 @@ def partners(m: Optional[str] = None):
         <div class="kpi"><span>Net Kalan Toplam Kar</span><b>{money(net_kar)}</b></div>
         <div class="kpi"><span>Ortak Sayısı</span><b>3</b></div>
         <div class="kpi"><span>Kişi Başı Pay</span><b>{money(ortak_pay)}</b></div>
-    </div>
-
-    <div class="card">
-        <h2>Ortak İsimlerini Değiştir</h2>
-        <p class="small">Buradan Ortak 1 / Ortak 2 / Ortak 3 isimlerini değiştirebilirsin.</p>
-        <table>
-            <colgroup>
-                <col style="width:10%">
-                <col style="width:90%">
-            </colgroup>
-            <tr>
-                <th>ID</th>
-                <th>Ortak İsmi</th>
-            </tr>
-            {partner_name_rows}
-        </table>
     </div>
 
     <div class="card">
@@ -996,26 +989,12 @@ def add_partner_advance(
 
 
 
-@app.post("/update-partner-name")
-def update_partner_name(
-    partner_id: int = Form(...),
-    name: str = Form(...),
-    m: str = Form("")
-):
-    ensure_partner_tables()
-    name = " ".join(name.strip().split())
-    if name:
-        exec_db("UPDATE partners SET name=%s WHERE id=%s", (name, partner_id))
-    return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-
 @app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
-def edit_partner_advance(aid: int, m: Optional[str] = None):
+def edit_partner_advance_page(aid: int, m: Optional[str] = None):
     ensure_partner_tables()
+
     rec = one("""
-        SELECT *
-        FROM partner_advances
-        WHERE id=%s
+        SELECT * FROM partner_advances WHERE id=%s
     """, (aid,))
 
     if not rec:
@@ -1029,7 +1008,7 @@ def edit_partner_advance(aid: int, m: Optional[str] = None):
 
     body = f"""
     <div class="card">
-        <h2>Ortak Avansı Güncelle</h2>
+        <h2>Ortak Avans Güncelle</h2>
         <form method="post" action="/edit-partner-advance/{aid}">
             <input type="hidden" name="m" value="{m or rec['adv_date'][:7]}">
             <div class="grid">
@@ -1044,7 +1023,7 @@ def edit_partner_advance(aid: int, m: Optional[str] = None):
         </form>
     </div>
     """
-    return page("Ortak Avansı Güncelle", body)
+    return page("Ortak Avans Güncelle", body)
 
 
 @app.post("/edit-partner-advance/{aid}")
@@ -1057,6 +1036,7 @@ def edit_partner_advance_save(
     m: str = Form("")
 ):
     ensure_partner_tables()
+
     try:
         datetime.strptime(adv_date, "%Y-%m-%d")
         amount = float(amount)
@@ -1084,22 +1064,13 @@ def delete_partner_advance(aid: int, m: Optional[str] = None):
 @app.get("/partner-name-edit", response_class=HTMLResponse)
 def partner_name_edit():
     ensure_partner_tables()
-    data = rows("SELECT id,name FROM partners ORDER BY id LIMIT 3")
-    trs = "".join([
-        f"<tr><td>{r['id']}</td><td><form method='post' action='/partner-name-edit' style='display:flex;gap:8px'><input type='hidden' name='partner_id' value='{r['id']}'><input name='name' value='{r['name']}' required><button class='btn green'>Kaydet</button></form></td></tr>"
-        for r in data
-    ])
-    body = f"<div class='card'><h2>Ortak İsimlerini Düzenle</h2><table><tr><th>ID</th><th>Ortak Adı</th></tr>{trs}</table></div>"
-    return page("Ortak İsimleri", body)
+    return RedirectResponse("/partners", status_code=303)
 
 
 @app.post("/partner-name-edit")
 def partner_name_edit_save(partner_id: int = Form(...), name: str = Form(...)):
     ensure_partner_tables()
-    name = " ".join(name.strip().split())
-    if name:
-        exec_db("UPDATE partners SET name=%s WHERE id=%s", (name, partner_id))
-    return RedirectResponse("/partner-name-edit", status_code=303)
+    return RedirectResponse("/partners", status_code=303)
 
 
 @app.get("/advances", response_class=HTMLResponse)
