@@ -214,7 +214,7 @@ def init_db():
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
 
-    for pname in ["Ortak 1", "Ortak 2", "Ortak 3"]:
+    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
         c.execute("""
         INSERT INTO partners(name, active, created_at)
         VALUES(%s,%s,%s)
