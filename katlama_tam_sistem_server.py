@@ -214,7 +214,7 @@ def init_db():
         ON CONFLICT(name) DO NOTHING
         """, (name, firm_price, worker_price, 1, now_iso()))
 
-    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
+    for pname in ["Ortak 1", "Ortak 2", "Ortak 3"]:
         c.execute("""
         INSERT INTO partners(name, active, created_at)
         VALUES(%s,%s,%s)
@@ -228,6 +228,48 @@ def init_db():
     con.commit()
     c.close()
     con.close()
+
+
+
+def ensure_partner_tables():
+    """
+    Ortaklar tablosu Render/Supabase tarafında yoksa otomatik oluşturur.
+    Böylece /partner-name-edit sayfası Internal Server Error vermez.
+    """
+    con = db()
+    c = con.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS partners(
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS partner_advances(
+        id SERIAL PRIMARY KEY,
+        adv_date TEXT NOT NULL,
+        partner_id INTEGER NOT NULL REFERENCES partners(id),
+        amount DOUBLE PRECISION NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
+        c.execute("""
+        INSERT INTO partners(name, active, created_at)
+        VALUES(%s,%s,%s)
+        ON CONFLICT(name) DO NOTHING
+        """, (pname, 1, now_iso()))
+
+    con.commit()
+    c.close()
+    con.close()
+
 
 
 CSS = """
@@ -778,6 +820,7 @@ def delete_expense(eid: int):
 
 @app.get("/partners", response_class=HTMLResponse)
 def partners(m: Optional[str] = None):
+    ensure_partner_tables()
     if not m:
         m = this_month()
 
@@ -904,6 +947,7 @@ def add_partner_advance(
     note: str = Form(""),
     m: str = Form("")
 ):
+    ensure_partner_tables()
     try:
         datetime.strptime(adv_date, "%Y-%m-%d")
         amount = float(amount)
@@ -922,12 +966,14 @@ def add_partner_advance(
 
 @app.get("/delete-partner-advance/{aid}")
 def delete_partner_advance(aid: int, m: Optional[str] = None):
+    ensure_partner_tables()
     exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,))
     return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
 
 
 @app.get("/partner-name-edit", response_class=HTMLResponse)
 def partner_name_edit():
+    ensure_partner_tables()
     data = rows("SELECT id,name FROM partners ORDER BY id LIMIT 3")
     trs = "".join([
         f"<tr><td>{r['id']}</td><td><form method='post' action='/partner-name-edit' style='display:flex;gap:8px'><input type='hidden' name='partner_id' value='{r['id']}'><input name='name' value='{r['name']}' required><button class='btn green'>Kaydet</button></form></td></tr>"
@@ -939,6 +985,7 @@ def partner_name_edit():
 
 @app.post("/partner-name-edit")
 def partner_name_edit_save(partner_id: int = Form(...), name: str = Form(...)):
+    ensure_partner_tables()
     name = " ".join(name.strip().split())
     if name:
         exec_db("UPDATE partners SET name=%s WHERE id=%s", (name, partner_id))
