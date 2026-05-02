@@ -893,9 +893,120 @@ def payments():
     total = one("SELECT COALESCE(SUM(amount),0) total FROM payments")["total"] or 0
     workers = rows("SELECT id,name FROM workers WHERE active=1 ORDER BY name")
     opts = "".join([f"<option value='{w['id']}'>{w['name']}</option>" for w in workers])
-    data = rows("SELECT p.id,p.pay_date,w.name worker,p.amount,COALESCE(p.note,'') note FROM payments p JOIN workers w ON w.id=p.worker_id ORDER BY p.pay_date DESC,p.id DESC LIMIT 500")
-    trs = "".join([f"<tr><td>{r['id']}</td><td>{r['pay_date']}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-payment/{r['id']}'>Sil</a></td></tr>" for r in data])
-    body = f"""<div class="kpis three"><div class="kpi"><span>Genel Ödeme Toplamı</span><b>{money(total)}</b></div><div class="kpi"><span>Tarih Filtresi</span><b>Yok</b></div><div class="kpi"><span>Kayıt</span><b>Her Giriş Ayrı</b></div></div><div class="card"><h2>Eleman Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih</label><input name="pay_date" value="{today()}" required></div><div><label>Eleman</label><select name="worker_id">{opts}</select></div><div><label>Tutar</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>Tarih</th><th>Eleman</th><th>Tutar</th><th>Not</th><th>İşlem</th></tr>{trs}</table></div>"""
+
+    data = rows("""
+    SELECT p.id,p.pay_date,w.name worker,p.amount,COALESCE(p.note,'') note
+    FROM payments p
+    JOIN workers w ON w.id=p.worker_id
+    ORDER BY p.pay_date DESC,p.id DESC
+    LIMIT 500
+    """)
+
+    trs = "".join([
+        f"<tr><td>{r['id']}</td><td>{r['pay_date']}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-payment/{r['id']}' onclick=\"return confirm('Ödeme kaydı silinsin mi?')\">Sil</a></td></tr>"
+        for r in data
+    ]) or "<tr><td colspan='6' class='center small'>Ödeme kaydı yok.</td></tr>"
+
+    by_worker = rows("""
+    SELECT w.id,w.name worker,
+           COALESCE(en.qty,0) qty,
+           COALESCE(en.earned,0) earned,
+           COALESCE(ad.amount,0) advance,
+           COALESCE(pa.amount,0) paid,
+           COALESCE(en.earned,0)-COALESCE(ad.amount,0)-COALESCE(pa.amount,0) remaining
+    FROM workers w
+    LEFT JOIN (
+        SELECT worker_id,
+               SUM(qty) qty,
+               SUM(qty*worker_price) earned
+        FROM entries
+        GROUP BY worker_id
+    ) en ON en.worker_id=w.id
+    LEFT JOIN (
+        SELECT worker_id,SUM(amount) amount
+        FROM advances
+        GROUP BY worker_id
+    ) ad ON ad.worker_id=w.id
+    LEFT JOIN (
+        SELECT worker_id,SUM(amount) amount
+        FROM payments
+        GROUP BY worker_id
+    ) pa ON pa.worker_id=w.id
+    WHERE w.active=1
+    ORDER BY w.name
+    """)
+
+    worker_rows = "".join([
+        f"<tr><td>{r['worker']}</td><td class='right'>{int(r['qty'] or 0)}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['remaining'])}</td></tr>"
+        for r in by_worker
+    ]) or "<tr><td colspan='6' class='center small'>Eleman yok.</td></tr>"
+
+    body = f"""
+    <div class="kpis three">
+        <div class="kpi"><span>Genel Ödeme Toplamı</span><b>{money(total)}</b></div>
+        <div class="kpi"><span>Hesap</span><b>Hak Ediş - Avans - Ödeme</b></div>
+        <div class="kpi"><span>Kayıt</span><b>Her Giriş Ayrı</b></div>
+    </div>
+
+    <div class="card">
+        <h2>Eleman Ödemesi</h2>
+        <form method="post" action="/add-payment">
+            <div class="grid">
+                <div><label>Tarih</label><input name="pay_date" value="{today()}" required></div>
+                <div><label>Eleman</label><select name="worker_id">{opts}</select></div>
+                <div><label>Ödeme Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div>
+                <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div>
+            </div>
+            <br><button class="btn green">Ödeme Kaydet</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Eleman Ödeme Özeti</h2>
+        <table>
+            <colgroup>
+                <col style="width:22%">
+                <col style="width:14%">
+                <col style="width:16%">
+                <col style="width:16%">
+                <col style="width:16%">
+                <col style="width:16%">
+            </colgroup>
+            <tr>
+                <th>Eleman</th>
+                <th class="right">Toplam Adet</th>
+                <th class="right">Hak Ediş</th>
+                <th class="right">Avans</th>
+                <th class="right">Ödenen</th>
+                <th class="right">Kalan</th>
+            </tr>
+            {worker_rows}
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Tüm Ödeme Kayıtları</h2>
+        <table>
+            <colgroup>
+                <col style="width:8%">
+                <col style="width:16%">
+                <col style="width:24%">
+                <col style="width:18%">
+                <col style="width:22%">
+                <col style="width:12%">
+            </colgroup>
+            <tr>
+                <th>ID</th>
+                <th>Tarih</th>
+                <th>Eleman</th>
+                <th class="right">Tutar</th>
+                <th>Not</th>
+                <th>İşlem</th>
+            </tr>
+            {trs}
+        </table>
+    </div>
+    """
     return page("Ödemeler", body)
 
 
