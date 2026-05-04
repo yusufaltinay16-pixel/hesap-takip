@@ -381,7 +381,8 @@ def total_summary():
         "net": revenue - labor - exp,
         "paid": paid,
         "advance": advance,
-        "labor_remaining": labor_remaining
+        "labor_remaining": labor_remaining,
+        "labor_display": labor_remaining
     }
 
 
@@ -424,7 +425,8 @@ def month_summary(m):
         "net": revenue - labor - exp,
         "paid": paid,
         "advance": advance,
-        "labor_remaining": labor_remaining
+        "labor_remaining": labor_remaining,
+        "labor_display": labor_remaining
     }
 
 
@@ -483,7 +485,7 @@ def dashboard():
     <div class="kpis">
         <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>İşçilik</span><b>{money(sm["labor"])}</b><div class="small">Ödenen: {money(sm["paid"])}<br>Kalan: {money(sm["labor_remaining"])}</div></div>
+        <div class="kpi"><span>Kalan İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
         <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
     </div>
@@ -1393,7 +1395,7 @@ def month(m: Optional[str] = None):
     ORDER BY p.name
     """, (like, like))
     ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm["labor"])}</b><div class="small">Ödenen: {money(sm["paid"])}<br>Kalan: {money(sm["labor_remaining"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>Kalan İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
     return page("Ay Sonu Rapor ve Net Kazanç", body)
 
 
