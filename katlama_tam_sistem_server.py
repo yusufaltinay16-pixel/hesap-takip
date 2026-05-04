@@ -368,6 +368,10 @@ def total_summary():
     paid = num(paid_row["total"] if paid_row else 0)
     advance = num(advance_row["total"] if advance_row else 0)
 
+    # Net kar işçilik giderini zaten düşer.
+    # Ödeme/avans ayrıca net kardan düşmez; sadece işçilik borcunu kapatır.
+    labor_remaining = labor - paid - advance
+
     return {
         "qty": qty,
         "revenue": revenue,
@@ -377,7 +381,7 @@ def total_summary():
         "net": revenue - labor - exp,
         "paid": paid,
         "advance": advance,
-        "labor_remaining": labor - paid - advance
+        "labor_remaining": labor_remaining
     }
 
 
@@ -409,6 +413,8 @@ def month_summary(m):
     paid = num(paid_row["total"] if paid_row else 0)
     advance = num(advance_row["total"] if advance_row else 0)
 
+    labor_remaining = labor - paid - advance
+
     return {
         "qty": qty,
         "revenue": revenue,
@@ -418,7 +424,7 @@ def month_summary(m):
         "net": revenue - labor - exp,
         "paid": paid,
         "advance": advance,
-        "labor_remaining": labor - paid - advance
+        "labor_remaining": labor_remaining
     }
 
 
@@ -477,7 +483,7 @@ def dashboard():
     <div class="kpis">
         <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div>
+        <div class="kpi"><span>İşçilik</span><b>{money(sm["labor"])}</b><div class="small">Ödenen: {money(sm["paid"])}<br>Kalan: {money(sm["labor_remaining"])}</div></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
         <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
     </div>
@@ -558,10 +564,11 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     FROM entries e JOIN products p ON p.id=e.product_id WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 20
     """, (worker["id"],))
     trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td class="center"><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
+
     kalan = num(total["earned"] if total else 0) - num(adv_total) - num(paid_total)
 
     body = f"""
-    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans/Ödeme Sonrası Kalan</span><b>{money(num(total['earned'] if total else 0) - num(adv_total) - num(paid_total))}</b></div></div></div>
+    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans/Ödeme Sonrası Kalan</span><b>{money(kalan)}</b></div></div></div>
     <div class="card worker-form"><h2>Adet Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih</label><input name="work_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{product_opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div>
     <div class="card">
         <h2>Son Kayıtlarım</h2>
@@ -1386,7 +1393,7 @@ def month(m: Optional[str] = None):
     ORDER BY p.name
     """, (like, like))
     ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm["labor"])}</b><div class="small">Ödenen: {money(sm["paid"])}<br>Kalan: {money(sm["labor_remaining"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
     return page("Ay Sonu Rapor ve Net Kazanç", body)
 
 
