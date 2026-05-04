@@ -547,6 +547,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
 
     total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s", (worker["id"],))
     adv_total = one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE worker_id=%s", (worker["id"],))["total"] or 0
+    paid_total = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE worker_id=%s", (worker["id"],))["total"] or 0
     today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
 
     msg = "<div class='notice'>Adet kaydedildi.</div>" if saved else ""
@@ -557,8 +558,10 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     FROM entries e JOIN products p ON p.id=e.product_id WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 20
     """, (worker["id"],))
     trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td class="center"><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
+    kalan = num(total["earned"] if total else 0) - num(adv_total) - num(paid_total)
+
     body = f"""
-    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans Sonrası Kalan</span><b>{money((total['earned'] or 0) - adv_total)}</b></div></div></div>
+    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans/Ödeme Sonrası Kalan</span><b>{money(num(total['earned'] if total else 0) - num(adv_total) - num(paid_total))}</b></div></div></div>
     <div class="card worker-form"><h2>Adet Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih</label><input name="work_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{product_opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div>
     <div class="card">
         <h2>Son Kayıtlarım</h2>
