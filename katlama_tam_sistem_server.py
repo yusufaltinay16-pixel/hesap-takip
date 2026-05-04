@@ -322,6 +322,7 @@ th.center,td.center{text-align:center}
 .notice{background:#052e1a;border:1px solid #166534;color:#dcfce7;padding:10px;border-radius:12px;margin:10px 0}.bad{background:#3b1111;border:1px solid #7f1d1d;color:#fee2e2;padding:10px;border-radius:12px;margin:10px 0}.copy{font-size:12px;word-break:break-all;color:#dbeafe}.small{font-size:12px;color:var(--muted)}
 .worker-hero{background:linear-gradient(135deg,#172554,#0f172a 55%,#052e1a);border:1px solid #334155;border-radius:24px;padding:18px;box-shadow:0 18px 45px #0008}.worker-title{font-size:28px;font-weight:900;margin:0 0 8px}.worker-sub{color:#cbd5e1;margin-bottom:12px}.worker-form input,.worker-form select{font-size:20px;padding:16px}.worker-form button{font-size:20px;padding:16px 22px;width:100%}
 .diff-plus{color:#22c55e;font-weight:900}.diff-minus{color:#ef4444;font-weight:900}.diff-zero{color:#cbd5e1;font-weight:900}
+.card table .btn{padding:8px 10px;font-size:13px;margin:2px}
 @media(max-width:900px){.grid,.kpis,.kpis.three{grid-template-columns:1fr}h1{font-size:20px}table{font-size:13px}th,td{padding:8px}.nav a,.btn{width:100%;text-align:center}.worker-title{font-size:24px}}
 </style>
 """
@@ -435,15 +436,17 @@ def dashboard():
     sm = total_summary()
 
     data = rows("""
-    SELECT e.id,e.work_date,w.name worker,p.name product,e.qty,e.firm_price,e.worker_price,
-           e.qty*e.firm_price revenue,e.qty*e.worker_price labor,e.qty*(e.firm_price-e.worker_price) gross,
+    SELECT e.id,e.work_date,w.name worker,p.name product,e.qty,
+           e.qty*e.worker_price labor,
            COALESCE(e.note,'') note,e.source
-    FROM entries e JOIN workers w ON w.id=e.worker_id JOIN products p ON p.id=e.product_id
+    FROM entries e
+    JOIN workers w ON w.id=e.worker_id
+    JOIN products p ON p.id=e.product_id
     ORDER BY e.work_date DESC,e.id DESC LIMIT 300
     """)
 
     trs = "".join([
-        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td>{r['product']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['revenue'])}</td><td class="right">{money(r['labor'])}</td><td class="right">{money(r['gross'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
+        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td>{r['product']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['labor'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
         for r in data
     ])
 
@@ -520,9 +523,9 @@ def dashboard():
                 <th>Eleman</th>
                 <th>Ürün</th>
                 <th class="right">Adet</th>
-                <th class="right">Eski Ciro</th>
                 <th class="right">İşçilik</th>
-                <th class="right">Eski Brüt</th>
+                <th class="right">İşçilik</th>
+                <th class="right"></th>
                 <th>Not</th>
                 <th>İşlem</th>
             </tr>
@@ -553,11 +556,30 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     SELECT e.id,e.work_date,p.name product,e.qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note
     FROM entries e JOIN products p ON p.id=e.product_id WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 20
     """, (worker["id"],))
-    trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
+    trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td class="center"><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
     body = f"""
     {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans Sonrası Kalan</span><b>{money((total['earned'] or 0) - adv_total)}</b></div></div></div>
     <div class="card worker-form"><h2>Adet Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih</label><input name="work_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{product_opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div>
-    <div class="card"><h2>Son Kayıtlarım</h2><table><tr><th>Tarih</th><th>Ürün</th><th>Adet</th><th>Hak Ediş</th><th>İşlem</th></tr>{trs}</table></div>
+    <div class="card">
+        <h2>Son Kayıtlarım</h2>
+        <table>
+            <colgroup>
+                <col style="width:18%">
+                <col style="width:24%">
+                <col style="width:16%">
+                <col style="width:20%">
+                <col style="width:22%">
+            </colgroup>
+            <tr>
+                <th>Tarih</th>
+                <th>Ürün</th>
+                <th class="right">Adet</th>
+                <th class="right">Hak Ediş</th>
+                <th class="center">İşlem</th>
+            </tr>
+            {trs}
+        </table>
+    </div>
     """
     return page("Benim Katlama Programım", body, nav=False)
 
