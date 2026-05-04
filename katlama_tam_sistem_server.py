@@ -446,15 +446,28 @@ def dashboard():
     data = rows("""
     SELECT e.id,e.work_date,w.name worker,p.name product,e.qty,
            e.qty*e.worker_price labor,
+           COALESCE(pa.paid,0) paid,
+           COALESCE(ad.advance,0) advance,
+           (e.qty*e.worker_price) - COALESCE(pa.paid,0) - COALESCE(ad.advance,0) remaining,
            COALESCE(e.note,'') note,e.source
     FROM entries e
     JOIN workers w ON w.id=e.worker_id
     JOIN products p ON p.id=e.product_id
+    LEFT JOIN (
+        SELECT worker_id,SUM(amount) paid
+        FROM payments
+        GROUP BY worker_id
+    ) pa ON pa.worker_id=e.worker_id
+    LEFT JOIN (
+        SELECT worker_id,SUM(amount) advance
+        FROM advances
+        GROUP BY worker_id
+    ) ad ON ad.worker_id=e.worker_id
     ORDER BY e.work_date DESC,e.id DESC LIMIT 300
     """)
 
     trs = "".join([
-        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td>{r['product']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['labor'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
+        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td>{r['product']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['labor'])}</td><td class="right">{money(r['paid'])}</td><td class="right">{money(r['remaining'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
         for r in data
     ])
 
@@ -485,7 +498,7 @@ def dashboard():
     <div class="kpis">
         <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>Kalan İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div>
+        <div class="kpi"><span>İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
         <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
     </div>
@@ -1395,7 +1408,7 @@ def month(m: Optional[str] = None):
     ORDER BY p.name
     """, (like, like))
     ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>Kalan İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
     return page("Ay Sonu Rapor ve Net Kazanç", body)
 
 
