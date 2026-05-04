@@ -41,6 +41,14 @@ def money(v):
         return "0,00 ₺"
 
 
+def num(v):
+    """PostgreSQL Decimal / None / float karışıklığını güvenli sayıya çevirir."""
+    try:
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
 def db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL yok. Render > Environment kısmına Supabase DATABASE_URL ekle.")
@@ -340,33 +348,24 @@ def home():
 
 
 def total_summary():
-    """
-    GENEL TOPLAM:
-    Tarih filtresi yok.
-    Firma hak edişi sadece firmaya teslim edilen adet üzerinden hesaplanır.
-    İşçilik elemanların girdiği adet üzerinden hesaplanır.
-    Masraf tüm masraflardan düşer.
-    """
     firma = one("""
-        SELECT 
-            COALESCE(SUM(d.firm_qty),0) qty,
-            COALESCE(SUM(d.firm_qty * p.firm_price),0) revenue
+        SELECT COALESCE(SUM(d.firm_qty),0) qty,
+               COALESCE(SUM(d.firm_qty * p.firm_price),0) revenue
         FROM deliveries d
         JOIN products p ON p.id=d.product_id
     """)
 
-    labor_row = one("""
-        SELECT COALESCE(SUM(e.qty * e.worker_price),0) labor_cost
-        FROM entries e
-    """)
+    labor_row = one("SELECT COALESCE(SUM(qty * worker_price),0) labor_cost FROM entries")
+    exp_row = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")
+    paid_row = one("SELECT COALESCE(SUM(amount),0) total FROM payments")
+    advance_row = one("SELECT COALESCE(SUM(amount),0) total FROM advances")
 
-    exp = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")["total"] or 0
-    paid = one("SELECT COALESCE(SUM(amount),0) total FROM payments")["total"] or 0
-    advance = one("SELECT COALESCE(SUM(amount),0) total FROM advances")["total"] or 0
-
-    qty = firma["qty"] or 0
-    revenue = firma["revenue"] or 0
-    labor = labor_row["labor_cost"] or 0
+    qty = num(firma["qty"] if firma else 0)
+    revenue = num(firma["revenue"] if firma else 0)
+    labor = num(labor_row["labor_cost"] if labor_row else 0)
+    exp = num(exp_row["total"] if exp_row else 0)
+    paid = num(paid_row["total"] if paid_row else 0)
+    advance = num(advance_row["total"] if advance_row else 0)
 
     return {
         "qty": qty,
@@ -382,34 +381,32 @@ def total_summary():
 
 
 def month_summary(m):
-    """
-    Ay sonu sayfası için aylık rapor.
-    Ana panel artık bunu kullanmaz.
-    """
     like = m + "%"
 
     firma = one("""
-        SELECT 
-            COALESCE(SUM(d.firm_qty),0) qty,
-            COALESCE(SUM(d.firm_qty * p.firm_price),0) revenue
+        SELECT COALESCE(SUM(d.firm_qty),0) qty,
+               COALESCE(SUM(d.firm_qty * p.firm_price),0) revenue
         FROM deliveries d
         JOIN products p ON p.id=d.product_id
         WHERE d.deliv_date LIKE %s
     """, (like,))
 
     labor_row = one("""
-        SELECT COALESCE(SUM(e.qty * e.worker_price),0) labor_cost
-        FROM entries e
-        WHERE e.work_date LIKE %s
+        SELECT COALESCE(SUM(qty * worker_price),0) labor_cost
+        FROM entries
+        WHERE work_date LIKE %s
     """, (like,))
 
-    exp = one("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE exp_date LIKE %s", (like,))["total"] or 0
-    paid = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE pay_date LIKE %s", (like,))["total"] or 0
-    advance = one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE adv_date LIKE %s", (like,))["total"] or 0
+    exp_row = one("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE exp_date LIKE %s", (like,))
+    paid_row = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE pay_date LIKE %s", (like,))
+    advance_row = one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE adv_date LIKE %s", (like,))
 
-    qty = firma["qty"] or 0
-    revenue = firma["revenue"] or 0
-    labor = labor_row["labor_cost"] or 0
+    qty = num(firma["qty"] if firma else 0)
+    revenue = num(firma["revenue"] if firma else 0)
+    labor = num(labor_row["labor_cost"] if labor_row else 0)
+    exp = num(exp_row["total"] if exp_row else 0)
+    paid = num(paid_row["total"] if paid_row else 0)
+    advance = num(advance_row["total"] if advance_row else 0)
 
     return {
         "qty": qty,
@@ -463,7 +460,7 @@ def dashboard():
     """)
 
     comp_tr = "".join([
-        f"<tr><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['worker_qty'] or 0)}</td><td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td></tr>"
+        f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{int(num(r['worker_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td></tr>"
         for r in compare
     ]) or "<tr><td colspan='4' class='center small'>Henüz kayıt yok.</td></tr>"
 
@@ -475,7 +472,7 @@ def dashboard():
     </div>
 
     <div class="kpis">
-        <div class="kpi"><span>Firma Teslim Adet</span><b>{int(sm['qty'])}</b></div>
+        <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
         <div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
@@ -718,7 +715,7 @@ def deliveries():
     """)
 
     trs = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['deliv_date']}</td><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td>{r['note'] or ''}</td><td><a class='btn red' href='/delete-delivery/{r['id']}' onclick=\"return confirm('Teslim kaydı silinsin mi?')\">Sil</a></td></tr>"
+        f"<tr><td>{r['id']}</td><td>{r['deliv_date']}</td><td>{r['product']}</td><td class='right'>{int(num(r['firm_qty']))}</td><td>{r['note'] or ''}</td><td><a class='btn red' href='/delete-delivery/{r['id']}' onclick=\"return confirm('Teslim kaydı silinsin mi?')\">Sil</a></td></tr>"
         for r in data
     ]) or "<tr><td colspan='6' class='center small'>Teslim kaydı yok.</td></tr>"
 
@@ -732,7 +729,7 @@ def deliveries():
     """)
 
     sum_tr = "".join([
-        f"<tr><td>{r['product']}</td><td class='right'>{int(r['firm_qty'] or 0)}</td><td class='right'>{int(r['worker_qty'] or 0)}</td><td class='right {diff_class(r['diff'])}'>{int(r['diff'] or 0)}</td></tr>"
+        f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{int(num(r['worker_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td></tr>"
         for r in summary
     ]) or "<tr><td colspan='4' class='center small'>Özet yok.</td></tr>"
 
@@ -740,7 +737,7 @@ def deliveries():
 
     body = f"""
     <div class="kpis three">
-        <div class="kpi"><span>Genel Firma Teslim Adet</span><b>{int(total_firm)}</b></div>
+        <div class="kpi"><span>Genel Firma Teslim Adet</span><b>{int(num(total_firm))}</b></div>
         <div class="kpi"><span>Kayıt Sistemi</span><b>Her Giriş Ayrı</b></div>
         <div class="kpi"><span>Tarih Filtresi</span><b>Yok</b></div>
     </div>
@@ -847,8 +844,8 @@ def partners(m: Optional[str] = None):
         m = this_month()
 
     sm = month_summary(m)
-    net_kar = float(sm["net"] or 0)
-    ortak_pay = net_kar / 3.0
+    net_kar = num(sm["net"] if sm else 0)
+    ortak_pay = num(net_kar) / 3.0
 
     partners_list = rows("""
     SELECT id,name FROM partners
@@ -872,7 +869,8 @@ def partners(m: Optional[str] = None):
         """, (p["id"], m + "%"))["total"] or 0
         adv = float(adv or 0)
 
-        kalan = ortak_pay - adv
+        adv = num(adv)
+        kalan = num(ortak_pay) - adv
         partner_rows += (
             f"<tr>"
             f"<td>{p['name']}</td>"
@@ -1249,7 +1247,7 @@ def payments():
     """)
 
     worker_rows = "".join([
-        f"<tr><td>{r['worker']}</td><td class='right'>{int(r['qty'] or 0)}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['remaining'])}</td></tr>"
+        f"<tr><td>{r['worker']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['remaining'])}</td></tr>"
         for r in by_worker
     ]) or "<tr><td colspan='6' class='center small'>Eleman yok.</td></tr>"
 
@@ -1348,8 +1346,8 @@ def month(m: Optional[str] = None):
     for r in by_worker:
         paid = one("SELECT COALESCE(SUM(amount),0) paid FROM payments WHERE worker_id=%s AND pay_date LIKE %s", (r["id"], like))["paid"] or 0
         advance = one("SELECT COALESCE(SUM(amount),0) advance FROM advances WHERE worker_id=%s AND adv_date LIKE %s", (r["id"], like))["advance"] or 0
-        remain = (r["earned"] or 0) - paid - advance
-        trs += f"<tr><td>{r['worker']}</td><td class='right'>{int(r['qty'] or 0)}</td><td class='right'>{money(r['earned'] or 0)}</td><td class='right'>{money(advance)}</td><td class='right'>{money(paid)}</td><td class='right'>{money(remain)}</td></tr>"
+        remain = num(r["earned"]) - num(paid) - num(advance)
+        trs += f"<tr><td>{r['worker']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['earned'] or 0)}</td><td class='right'>{money(advance)}</td><td class='right'>{money(paid)}</td><td class='right'>{money(remain)}</td></tr>"
     by_product = rows("""
     SELECT p.name product, 
            COALESCE(fd.firm_qty,0) qty,
@@ -1362,8 +1360,8 @@ def month(m: Optional[str] = None):
     WHERE p.active=1
     ORDER BY p.name
     """, (like, like))
-    ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(r['qty'] or 0)}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(sm['qty'])}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
+    ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
     return page("Ay Sonu Rapor ve Net Kazanç", body)
 
 
@@ -1377,7 +1375,7 @@ def export_month(m: Optional[str] = None):
         wr = csv.writer(f, delimiter=";")
         wr.writerow(["AY SONU GENEL ÖZET"])
         wr.writerow(["Ay", m])
-        wr.writerow(["Firma Teslim Adet", int(sm["qty"])])
+        wr.writerow(["Firma Teslim Adet", int(num(sm["qty"]))])
         wr.writerow(["Firma Hak Ediş", f"{sm['revenue']:.2f}"])
         wr.writerow(["İşçilik", f"{sm['labor']:.2f}"])
         wr.writerow(["Avanslar", f"{sm.get('advance', 0):.2f}"])
