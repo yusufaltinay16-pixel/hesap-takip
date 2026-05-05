@@ -359,18 +359,12 @@ def total_summary():
     labor_row = one("SELECT COALESCE(SUM(qty * worker_price),0) labor_cost FROM entries")
     exp_row = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")
     paid_row = one("SELECT COALESCE(SUM(amount),0) total FROM payments")
-    advance_row = one("SELECT COALESCE(SUM(amount),0) total FROM advances")
 
     qty = num(firma["qty"] if firma else 0)
     revenue = num(firma["revenue"] if firma else 0)
     labor = num(labor_row["labor_cost"] if labor_row else 0)
     exp = num(exp_row["total"] if exp_row else 0)
     paid = num(paid_row["total"] if paid_row else 0)
-    advance = num(advance_row["total"] if advance_row else 0)
-
-    # Net kar işçilik giderini zaten düşer.
-    # Ödeme/avans ayrıca net kardan düşmez; sadece işçilik borcunu kapatır.
-    labor_remaining = labor - paid - advance
 
     return {
         "qty": qty,
@@ -380,9 +374,8 @@ def total_summary():
         "gross": revenue - labor,
         "net": revenue - labor - exp,
         "paid": paid,
-        "advance": advance,
-        "labor_remaining": labor_remaining,
-        "labor_display": labor_remaining
+        "advance": 0,
+        "labor_remaining": labor - paid
     }
 
 
@@ -405,16 +398,14 @@ def month_summary(m):
 
     exp_row = one("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE exp_date LIKE %s", (like,))
     paid_row = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE pay_date LIKE %s", (like,))
-    advance_row = one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE adv_date LIKE %s", (like,))
 
     qty = num(firma["qty"] if firma else 0)
     revenue = num(firma["revenue"] if firma else 0)
     labor = num(labor_row["labor_cost"] if labor_row else 0)
     exp = num(exp_row["total"] if exp_row else 0)
     paid = num(paid_row["total"] if paid_row else 0)
-    advance = num(advance_row["total"] if advance_row else 0)
 
-    labor_remaining = labor - paid - advance
+    labor_remaining = labor - paid
 
     return {
         "qty": qty,
@@ -424,9 +415,8 @@ def month_summary(m):
         "gross": revenue - labor,
         "net": revenue - labor - exp,
         "paid": paid,
-        "advance": advance,
-        "labor_remaining": labor_remaining,
-        "labor_display": labor_remaining
+        "advance": 0,
+        "labor_remaining": labor_remaining
     }
 
 
@@ -446,28 +436,28 @@ def dashboard():
     data = rows("""
     SELECT e.id,e.work_date,w.name worker,p.name product,e.qty,
            e.qty*e.worker_price labor,
-           COALESCE(pa.paid,0) paid,
            COALESCE(ad.advance,0) advance,
-           (e.qty*e.worker_price) - COALESCE(pa.paid,0) - COALESCE(ad.advance,0) remaining,
+           COALESCE(pa.paid,0) paid,
+           (e.qty*e.worker_price)-COALESCE(ad.advance,0)-COALESCE(pa.paid,0) remaining,
            COALESCE(e.note,'') note,e.source
     FROM entries e
     JOIN workers w ON w.id=e.worker_id
     JOIN products p ON p.id=e.product_id
     LEFT JOIN (
-        SELECT worker_id,SUM(amount) paid
-        FROM payments
-        GROUP BY worker_id
-    ) pa ON pa.worker_id=e.worker_id
-    LEFT JOIN (
-        SELECT worker_id,SUM(amount) advance
+        SELECT worker_id,adv_date,SUM(amount) advance
         FROM advances
-        GROUP BY worker_id
-    ) ad ON ad.worker_id=e.worker_id
+        GROUP BY worker_id,adv_date
+    ) ad ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
+    LEFT JOIN (
+        SELECT worker_id,pay_date,SUM(amount) paid
+        FROM payments
+        GROUP BY worker_id,pay_date
+    ) pa ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
     ORDER BY e.work_date DESC,e.id DESC LIMIT 300
     """)
 
     trs = "".join([
-        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td>{r['product']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['labor'])}</td><td class="right">{money(r['paid'])}</td><td class="right">{money(r['remaining'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
+        f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td class="right">{r['qty']}</td><td class="right">{money(r['labor'])}</td><td class="right">{money(r['advance'])}</td><td class="right">{money(r['paid'])}</td><td class="right">{money(r['remaining'])}</td><td>{r['note']}</td><td><a class="btn red" href="/delete-entry/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>"""
         for r in data
     ])
 
@@ -491,14 +481,14 @@ def dashboard():
     body = f"""
     <div class="card">
         <div class="notice">
-            Ana panel artık tarih aralığı kullanmaz. Buradaki rakamlar tüm kayıtların genel toplamıdır. Avanslar eleman alacağından düşer.
+            Ana panel artık tarih aralığı kullanmaz. Buradaki rakamlar tüm kayıtların genel toplamıdır.
         </div>
     </div>
 
     <div class="kpis">
         <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div>
+        <div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b><div class="small">Ödenen: {money(sm['paid'])}<br>Kalan: {money(sm['labor_remaining'])}</div></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
         <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
     </div>
@@ -508,47 +498,28 @@ def dashboard():
         <p class="small">Tarih fark etmeksizin tüm firma teslim kayıtları ve tüm eleman katlama adetleri karşılaştırılır.</p>
         <table>
             <colgroup>
-                <col style="width:28%">
-                <col style="width:24%">
-                <col style="width:24%">
-                <col style="width:24%">
-            </colgroup>
-            <tr>
-                <th>Ürün</th>
-                <th class="right">Firma Teslim Adet</th>
-                <th class="right">Eleman Katlama Adet</th>
-                <th class="right">Fark</th>
-            </tr>
-            {comp_tr}
-        </table>
-    </div>
-
-    <div class="card">
-        <h2>Son Eleman Kayıtları</h2>
-        <table>
-            <colgroup>
                 <col style="width:6%">
                 <col style="width:11%">
                 <col style="width:13%">
                 <col style="width:13%">
                 <col style="width:8%">
-                <col style="width:11%">
-                <col style="width:11%">
-                <col style="width:11%">
-                <col style="width:10%">
-                <col style="width:7%">
+                <col style="width:12%">
+                <col style="width:12%">
+                <col style="width:12%">
+                <col style="width:8%">
+                <col style="width:8%">
             </colgroup>
             <tr>
                 <th>ID</th>
-                <th>Tarih</th>
-                <th>Eleman</th>
-                <th>Ürün</th>
-                <th class="right">Adet</th>
-                <th class="right">İşçilik</th>
-                <th class="right">İşçilik</th>
-                <th class="right"></th>
-                <th>Not</th>
-                <th>İşlem</th>
+                <th>TARİH</th>
+                <th>ÇALIŞAN</th>
+                <th class="right">ADET</th>
+                <th class="right">HAKEDİŞ</th>
+                <th class="right">AVANS</th>
+                <th class="right">ÖDEME</th>
+                <th class="right">NET KALAN</th>
+                <th>NOT</th>
+                <th>İŞLEM</th>
             </tr>
             {trs}
         </table>
@@ -567,7 +538,6 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     product_opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
 
     total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s", (worker["id"],))
-    adv_total = one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE worker_id=%s", (worker["id"],))["total"] or 0
     paid_total = one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE worker_id=%s", (worker["id"],))["total"] or 0
     today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
 
@@ -575,264 +545,54 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     if error:
         msg = f"<div class='bad'>{error}</div>"
     last_rows = rows("""
-    SELECT e.id,e.work_date,p.name product,e.qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note
-    FROM entries e JOIN products p ON p.id=e.product_id WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 20
-    """, (worker["id"],))
-    trs = "".join([f"""<tr><td>{r['work_date']}</td><td>{r['product']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td class="center"><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
+    SELECT e.id,e.work_date,%s worker,e.qty,e.qty*e.worker_price earned,
+           COALESCE(ad.advance,0) advance,
+           COALESCE(pa.paid,0) paid,
+           (e.qty*e.worker_price)-COALESCE(ad.advance,0)-COALESCE(pa.paid,0) remaining,
+           COALESCE(e.note,'') note
+    FROM entries e
+    LEFT JOIN (SELECT worker_id,adv_date,SUM(amount) advance FROM advances GROUP BY worker_id,adv_date) ad
+        ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
+    LEFT JOIN (SELECT worker_id,pay_date,SUM(amount) paid FROM payments GROUP BY worker_id,pay_date) pa
+        ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
+    WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 20
+    """, (worker["name"], worker["id"]))
+    trs = "".join([f"""<tr><td>{r['id']}</td><td>{r['work_date']}</td><td>{r['worker']}</td><td class='right'>{r['qty']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['remaining'])}</td><td>{r['note']}</td><td class="center"><a class="btn yellow" href="/w/{token}/edit/{r['id']}">Güncelle</a> <a class="btn red" href="/w/{token}/delete/{r['id']}" onclick="return confirm('Bu kayıt silinsin mi?')">Sil</a></td></tr>""" for r in last_rows])
 
-    kalan = num(total["earned"] if total else 0) - num(adv_total) - num(paid_total)
+    kalan = num(total["earned"] if total else 0) - num(paid_total)
 
     body = f"""
-    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Avans/Ödeme Sonrası Kalan</span><b>{money(kalan)}</b></div></div></div>
+    {msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Katlama Paneli</div><div class="worker-sub">Adetini gir, kendi kayıtlarını gör, yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü Adedim</span><b>{int(today_total['qty'] or 0)}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] or 0)}</b></div><div class="kpi"><span>Ödeme Sonrası Kalan</span><b>{money(kalan)}</b></div></div></div>
     <div class="card worker-form"><h2>Adet Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih</label><input name="work_date" value="{today()}" required></div><div><label>Ürün</label><select name="product_id" required>{product_opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div>
     <div class="card">
         <h2>Son Kayıtlarım</h2>
         <table>
             <colgroup>
-                <col style="width:18%">
-                <col style="width:24%">
-                <col style="width:16%">
-                <col style="width:20%">
-                <col style="width:22%">
+                <col style="width:6%">
+                <col style="width:11%">
+                <col style="width:13%">
+                <col style="width:13%">
+                <col style="width:8%">
+                <col style="width:12%">
+                <col style="width:12%">
+                <col style="width:12%">
+                <col style="width:8%">
+                <col style="width:8%">
             </colgroup>
             <tr>
-                <th>Tarih</th>
-                <th>Ürün</th>
-                <th class="right">Adet</th>
-                <th class="right">Hak Ediş</th>
-                <th class="center">İşlem</th>
+                <th>ID</th>
+                <th>TARİH</th>
+                <th>ÇALIŞAN</th>
+                <th class="right">ADET</th>
+                <th class="right">HAKEDİŞ</th>
+                <th class="right">AVANS</th>
+                <th class="right">ÖDEME</th>
+                <th class="right">NET KALAN</th>
+                <th>NOT</th>
+                <th>İŞLEM</th>
             </tr>
             {trs}
-        </table>
-    </div>
-    """
-    return page("Benim Katlama Programım", body, nav=False)
-
-
-@app.post("/w/{token}/add")
-def worker_add(token: str, work_date: str = Form(...), product_id: int = Form(...), qty: int = Form(...), note: str = Form("")):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    if not worker:
-        return RedirectResponse(f"/w/{token}?error=Link geçersiz", status_code=303)
-    product = one("SELECT * FROM products WHERE id=%s AND active=1", (product_id,))
-    if not product:
-        return RedirectResponse(f"/w/{token}?error=Ürün bulunamadı", status_code=303)
-    try:
-        datetime.strptime(work_date, "%Y-%m-%d")
-        qty = int(qty)
-        if qty <= 0:
-            raise ValueError()
-    except Exception:
-        return RedirectResponse(f"/w/{token}?error=Tarih veya adet hatalı", status_code=303)
-    exec_db("INSERT INTO entries(work_date,worker_id,product_id,qty,firm_price,worker_price,note,created_at,source) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)", (work_date, worker["id"], product_id, qty, float(product["firm_price"] or 0), float(product["worker_price"] or 0), note, now_iso(), "whatsapp-link"))
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
-
-
-@app.get("/w/{token}/edit/{entry_id}", response_class=HTMLResponse)
-def worker_edit_page(token: str, entry_id: int):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    if not worker:
-        return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
-    entry = one("SELECT e.*, p.name product FROM entries e JOIN products p ON p.id=e.product_id WHERE e.id=%s AND e.worker_id=%s", (entry_id, worker["id"]))
-    if not entry:
-        return page("Kayıt Bulunamadı", "<div class='bad'>Bu kayıt bulunamadı veya sana ait değil.</div>", nav=False)
-    products = rows("SELECT id,name FROM products WHERE active=1 ORDER BY name")
-    opts = "".join([f"<option value='{p['id']}' {'selected' if p['id'] == entry['product_id'] else ''}>{p['name']}</option>" for p in products])
-    body = f"""<div class="card"><h2>Kayıt Güncelle</h2><form method="post" action="/w/{token}/edit/{entry_id}"><div class="grid"><div><label>Tarih</label><input name="work_date" value="{entry['work_date']}" required></div><div><label>Ürün</label><select name="product_id" required>{opts}</select></div><div><label>Adet</label><input name="qty" type="number" min="1" value="{entry['qty']}" required autofocus></div><div style="grid-column:span 2"><label>Not</label><input name="note" value="{entry['note'] or ''}"></div></div><br><button class="btn green" type="submit">Güncellemeyi Kaydet</button> <a class="btn gray" href="/w/{token}">Geri Dön</a></form></div>"""
-    return page("Kayıt Güncelle", body, nav=False)
-
-
-@app.post("/w/{token}/edit/{entry_id}")
-def worker_edit_save(token: str, entry_id: int, work_date: str = Form(...), product_id: int = Form(...), qty: int = Form(...), note: str = Form("")):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    if not worker:
-        return RedirectResponse(f"/w/{token}?error=Link geçersiz", status_code=303)
-    product = one("SELECT * FROM products WHERE id=%s AND active=1", (product_id,))
-    if not product:
-        return RedirectResponse(f"/w/{token}?error=Ürün bulunamadı", status_code=303)
-    try:
-        datetime.strptime(work_date, "%Y-%m-%d")
-        qty = int(qty)
-        if qty <= 0:
-            raise ValueError()
-    except Exception:
-        return RedirectResponse(f"/w/{token}?error=Tarih veya adet hatalı", status_code=303)
-    exec_db("UPDATE entries SET work_date=%s, product_id=%s, qty=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s AND worker_id=%s", (work_date, product_id, qty, float(product["firm_price"] or 0), float(product["worker_price"] or 0), note, entry_id, worker["id"]))
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
-
-
-@app.get("/w/{token}/delete/{entry_id}")
-def worker_delete_entry(token: str, entry_id: int):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    if worker:
-        exec_db("DELETE FROM entries WHERE id=%s AND worker_id=%s", (entry_id, worker["id"]))
-    return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
-
-
-@app.get("/workers", response_class=HTMLResponse)
-def workers(request: Request):
-    data = rows("SELECT id,name,phone,token,active FROM workers ORDER BY active DESC,name")
-    base = str(request.base_url).rstrip("/")
-    trs = ""
-    for r in data:
-        link = f"{base}/w/{r['token']}"
-        wa_msg = f"""Merhaba {r['name']}
-
-Katlama adet giriş linkin:
-{link}
-
-Linke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."""
-        wa_text = quote(wa_msg)
-        trs += f"""<tr><td>{r['id']}</td><td>{r['name']}</td><td>{r['phone'] or ''}</td><td>{'Aktif' if r['active'] else 'Pasif'}</td><td><span class="copy" id="link_{r['id']}">{link}</span><br><button class="btn gray" type="button" onclick="copyLink('link_{r['id']}')">Linki Kopyala</button></td><td><a class="btn green" target="_blank" href="https://wa.me/?text={wa_text}">WhatsApp'a At</a></td><td><a class="btn yellow" href="/worker-new-link/{r['id']}">Yeni Link</a></td><td><a class="btn red" href="/worker-off/{r['id']}">Pasifleştir</a></td></tr>"""
-    body = f"""<div class="card"><h2>Eleman Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Ad Soyad</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05xx..."></div></div><br><button class="btn green">Eleman Ekle</button></form></div><div class="card"><h2>WhatsApp Özel Linkleri</h2><p class="small">Her elemana ayrı link gider. Eleman sadece kendi ekranını görür.</p><table><tr><th>ID</th><th>Eleman</th><th>Telefon</th><th>Durum</th><th>Özel Link</th><th>WhatsApp</th><th>Link Yenile</th><th>İşlem</th></tr>{trs}</table></div><script>function copyLink(id){{const text=document.getElementById(id).innerText.trim();navigator.clipboard.writeText(text).then(function(){{alert('Link kopyalandı.')}}).catch(function(){{prompt('Linki kopyala:',text);}});}}</script>"""
-    return page("Elemanlar ve WhatsApp Linkleri", body)
-
-
-@app.post("/add-worker")
-def add_worker(name: str = Form(...), phone: str = Form("")):
-    name = name.strip(); phone = phone.strip()
-    if name:
-        old = one("SELECT id FROM workers WHERE name=%s", (name,))
-        if old:
-            exec_db("UPDATE workers SET active=1, phone=COALESCE(NULLIF(%s,''),phone) WHERE name=%s", (phone, name))
-        else:
-            exec_db("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,%s,%s)", (name, phone, secrets.token_urlsafe(12), 1, now_iso()))
-    return RedirectResponse("/workers", status_code=303)
-
-
-@app.get("/worker-new-link/{worker_id}")
-def worker_new_link(worker_id: int):
-    exec_db("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(12), worker_id))
-    return RedirectResponse("/workers", status_code=303)
-
-
-@app.get("/worker-off/{worker_id}")
-def worker_off(worker_id: int):
-    exec_db("UPDATE workers SET active=0 WHERE id=%s", (worker_id,))
-    return RedirectResponse("/workers", status_code=303)
-
-
-@app.get("/products", response_class=HTMLResponse)
-def products():
-    data = rows("SELECT id,name,firm_price,worker_price,active FROM products ORDER BY active DESC,name")
-    trs = "".join([f"""<tr><td>{r['id']}</td><td>{r['name']}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money((r['firm_price'] or 0)-(r['worker_price'] or 0))}</td><td>{'Aktif' if r['active'] else 'Pasif'}</td><td><a class='btn red' href='/delete-product/{r['id']}' onclick="return confirm('Bu ürün silinsin mi? Kayıtlarda kullanıldıysa sadece pasif yapılır.')">Sil</a></td></tr>""" for r in data])
-    body = f"""<div class="card"><h2>Ürün ve Fiyatlar</h2><form method="post" action="/add-product"><div class="grid"><div><label>Ürün adı</label><input name="name" required></div><div><label>Firmadan Aldığın Ücret / Adet</label><input name="firm_price" type="number" step="0.01" min="0" required></div><div><label>Elemana Verdiğin Ücret / Adet</label><input name="worker_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">Kaydet / Güncelle</button></form></div><div class="card"><table><tr><th>ID</th><th>Ürün</th><th>Firma Ücreti</th><th>Eleman Ücreti</th><th>Adet Başı Brüt</th><th>Durum</th><th>İşlem</th></tr>{trs}</table></div>"""
-    return page("Ürün / Firma Ücreti / Eleman Ücreti", body)
-
-
-@app.post("/add-product")
-def add_product(name: str = Form(...), firm_price: float = Form(...), worker_price: float = Form(...)):
-    name = " ".join(name.strip().split())
-    if not name:
-        return RedirectResponse("/products", status_code=303)
-    all_products = rows("SELECT id,name FROM products")
-    old_id = None
-    for p in all_products:
-        if product_key(p["name"]) == product_key(name):
-            old_id = p["id"]
-            break
-    if old_id:
-        exec_db("UPDATE products SET name=%s, firm_price=%s, worker_price=%s, active=1 WHERE id=%s", (name, firm_price, worker_price, old_id))
-    else:
-        exec_db("INSERT INTO products(name,firm_price,worker_price,active,created_at) VALUES(%s,%s,%s,%s,%s)", (name, firm_price, worker_price, 1, now_iso()))
-    return RedirectResponse("/products", status_code=303)
-
-
-@app.get("/delete-product/{product_id}")
-def delete_product(product_id: int):
-    used1 = one("SELECT id FROM entries WHERE product_id=%s LIMIT 1", (product_id,))
-    used2 = one("SELECT id FROM deliveries WHERE product_id=%s LIMIT 1", (product_id,))
-    if used1 or used2:
-        exec_db("UPDATE products SET active=0 WHERE id=%s", (product_id,))
-    else:
-        exec_db("DELETE FROM products WHERE id=%s", (product_id,))
-    return RedirectResponse("/products", status_code=303)
-
-
-@app.get("/deliveries", response_class=HTMLResponse)
-def deliveries():
-    products = rows("SELECT id,name FROM products WHERE active=1 ORDER BY name")
-    popts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
-
-    data = rows("""
-    SELECT d.*, p.name product
-    FROM deliveries d JOIN products p ON p.id=d.product_id
-    ORDER BY d.deliv_date DESC,d.id DESC
-    LIMIT 500
-    """)
-
-    trs = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['deliv_date']}</td><td>{r['product']}</td><td class='right'>{int(num(r['firm_qty']))}</td><td>{r['note'] or ''}</td><td><a class='btn red' href='/delete-delivery/{r['id']}' onclick=\"return confirm('Teslim kaydı silinsin mi?')\">Sil</a></td></tr>"
-        for r in data
-    ]) or "<tr><td colspan='6' class='center small'>Teslim kaydı yok.</td></tr>"
-
-    summary = rows("""
-    SELECT p.name product, COALESCE(fd.firm_qty,0) firm_qty, COALESCE(en.worker_qty,0) worker_qty, COALESCE(en.worker_qty,0)-COALESCE(fd.firm_qty,0) diff
-    FROM products p
-    LEFT JOIN (SELECT product_id,SUM(firm_qty) firm_qty FROM deliveries GROUP BY product_id) fd ON fd.product_id=p.id
-    LEFT JOIN (SELECT product_id,SUM(qty) worker_qty FROM entries GROUP BY product_id) en ON en.product_id=p.id
-    WHERE p.active=1 AND (COALESCE(fd.firm_qty,0)>0 OR COALESCE(en.worker_qty,0)>0)
-    ORDER BY p.name
-    """)
-
-    sum_tr = "".join([
-        f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{int(num(r['worker_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td></tr>"
-        for r in summary
-    ]) or "<tr><td colspan='4' class='center small'>Özet yok.</td></tr>"
-
-    total_firm = one("SELECT COALESCE(SUM(firm_qty),0) total FROM deliveries")["total"] or 0
-
-    body = f"""
-    <div class="kpis three">
-        <div class="kpi"><span>Genel Firma Teslim Adet</span><b>{int(num(total_firm))}</b></div>
-        <div class="kpi"><span>Kayıt Sistemi</span><b>Her Giriş Ayrı</b></div>
-        <div class="kpi"><span>Tarih Filtresi</span><b>Yok</b></div>
-    </div>
-
-    <div class="card">
-        <h2>Firma Teslim Girişi</h2>
-        <p class="small">Aynı tarih ve aynı ürün olsa bile her yazdığın adet ayrı kayıt olarak saklanır.</p>
-        <form method="post" action="/add-delivery">
-            <div class="grid">
-                <div><label>Tarih</label><input name="deliv_date" value="{today()}" required></div>
-                <div><label>Ürün</label><select name="product_id" required>{popts}</select></div>
-                <div><label>Firmaya Teslim Edilen Adet</label><input name="firm_qty" type="number" min="1" required></div>
-                <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div>
-            </div>
-            <br><button class="btn green">Firma Teslim Kaydet</button>
-        </form>
-    </div>
-
-    <div class="card"><h2>Ürün Bazlı Genel Karşılaştırma</h2><table>
-<colgroup>
-    <col style="width:28%">
-    <col style="width:24%">
-    <col style="width:24%">
-    <col style="width:24%">
-</colgroup>
-<tr>
-    <th>Ürün</th>
-    <th class="right">Firma Teslim Adet</th>
-    <th class="right">Eleman Katlama Adet</th>
-    <th class="right">Fark</th>
-</tr>{sum_tr}</table></div>
-    <div class="card"><h2>Tüm Teslim Kayıtları</h2><table>
-<colgroup>
-    <col style="width:8%">
-    <col style="width:16%">
-    <col style="width:24%">
-    <col style="width:16%">
-    <col style="width:24%">
-    <col style="width:12%">
-</colgroup>
-<tr>
-    <th>ID</th>
-    <th>Tarih</th>
-    <th>Ürün</th>
-    <th class="right">Firma Adet</th>
-    <th>Not</th>
-    <th>İşlem</th>
-</tr>{trs}</table></div>
+        </table></div>
     """
     return page("Firma Teslim ve Genel Karşılaştırma", body)
 
@@ -974,252 +734,32 @@ def partners(m: Optional[str] = None):
     <div class="card">
         <h2>Ortaklar Hesap Özeti</h2>
         <table>
-            <colgroup>
-                <col style="width:25%">
-                <col style="width:25%">
-                <col style="width:25%">
-                <col style="width:25%">
-            </colgroup>
             <tr>
-                <th>Ortak</th>
-                <th class="right">Kar Payı</th>
-                <th class="right">Ay İçinde Aldığı Avans</th>
-                <th class="right">Net Kalan</th>
+                <th>ORTAK</th>
+                <th class="right">ORTAK PAYI</th>
+                <th class="right">AVANS</th>
+                <th class="right">NET KALAN</th>
             </tr>
             {partner_rows}
         </table>
     </div>
 
     <div class="card">
-        <h2>Bu Ay Ortak Avans Kayıtları</h2>
+        <h2>Ortak Avans Kayıtları</h2>
         <table>
-            <colgroup>
-                <col style="width:8%">
-                <col style="width:16%">
-                <col style="width:22%">
-                <col style="width:18%">
-                <col style="width:24%">
-                <col style="width:16%">
-            </colgroup>
             <tr>
                 <th>ID</th>
-                <th>Tarih</th>
-                <th>Ortak</th>
-                <th class="right">Avans</th>
-                <th>Not</th>
-                <th>İşlem</th>
+                <th>TARİH</th>
+                <th>ORTAK</th>
+                <th class="right">AVANS</th>
+                <th>NOT</th>
+                <th>İŞLEM</th>
             </tr>
             {adv_rows}
         </table>
     </div>
     """
     return page("Ortaklar Hesap", body)
-
-
-@app.post("/add-partner-advance")
-def add_partner_advance(
-    adv_date: str = Form(...),
-    partner_id: int = Form(...),
-    amount: float = Form(...),
-    note: str = Form(""),
-    m: str = Form("")
-):
-    ensure_fixed_partners()
-    ensure_fixed_partners()
-    try:
-        datetime.strptime(adv_date, "%Y-%m-%d")
-        amount = float(amount)
-        if amount <= 0:
-            raise ValueError()
-    except Exception:
-        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-    exec_db("""
-        INSERT INTO partner_advances(adv_date,partner_id,amount,note,created_at)
-        VALUES(%s,%s,%s,%s,%s)
-    """, (adv_date, partner_id, amount, note, now_iso()))
-
-    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
-
-
-@app.get("/edit-partner-advance/{aid}", response_class=HTMLResponse)
-def edit_partner_advance_page(aid: int, m: Optional[str] = None):
-    ensure_fixed_partners()
-    rec = one("SELECT * FROM partner_advances WHERE id=%s", (aid,))
-    if not rec:
-        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-    partners_list = rows("""
-    SELECT id,name FROM partners
-    WHERE active=1 AND name IN ('yusuf altınay','mine ulu','emine erol')
-    ORDER BY CASE name
-        WHEN 'yusuf altınay' THEN 1
-        WHEN 'mine ulu' THEN 2
-        WHEN 'emine erol' THEN 3
-        ELSE 4
-    END
-    """)
-    opts = "".join([f"<option value='{p['id']}' {'selected' if p['id'] == rec['partner_id'] else ''}>{p['name']}</option>" for p in partners_list])
-
-    body = f"""
-    <div class="card">
-        <h2>Ortak Avans Güncelle</h2>
-        <form method="post" action="/edit-partner-advance/{aid}">
-            <input type="hidden" name="m" value="{m or rec['adv_date'][:7]}">
-            <div class="grid">
-                <div><label>Tarih</label><input name="adv_date" value="{rec['adv_date']}" required></div>
-                <div><label>Ortak</label><select name="partner_id" required>{opts}</select></div>
-                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" value="{rec['amount']}" required></div>
-                <div style="grid-column:span 2"><label>Not</label><input name="note" value="{rec['note'] or ''}"></div>
-            </div>
-            <br><button class="btn green">Güncellemeyi Kaydet</button> <a class="btn gray" href="/partners?m={m or rec['adv_date'][:7]}">Geri Dön</a>
-        </form>
-    </div>
-    """
-    return page("Ortak Avans Güncelle", body)
-
-
-@app.post("/edit-partner-advance/{aid}")
-def edit_partner_advance_save(aid: int, adv_date: str = Form(...), partner_id: int = Form(...), amount: float = Form(...), note: str = Form(""), m: str = Form("")):
-    try:
-        datetime.strptime(adv_date, "%Y-%m-%d")
-        amount = float(amount)
-        if amount <= 0:
-            raise ValueError()
-    except Exception:
-        return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-    exec_db("""
-    UPDATE partner_advances SET adv_date=%s, partner_id=%s, amount=%s, note=%s
-    WHERE id=%s
-    """, (adv_date, partner_id, amount, note, aid))
-    return RedirectResponse(f"/partners?m={m or adv_date[:7]}", status_code=303)
-
-
-@app.get("/delete-partner-advance/{aid}")
-def delete_partner_advance(aid: int, m: Optional[str] = None):
-    ensure_fixed_partners()
-    exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,))
-    return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
-
-
-
-
-@app.get("/advances", response_class=HTMLResponse)
-def advances():
-    total = one("SELECT COALESCE(SUM(amount),0) total FROM advances")["total"] or 0
-    workers = rows("SELECT id,name FROM workers WHERE active=1 ORDER BY name")
-    opts = "".join([f"<option value='{w['id']}'>{w['name']}</option>" for w in workers])
-
-    data = rows("""
-    SELECT a.id,a.adv_date,w.name worker,a.amount,COALESCE(a.note,'') note
-    FROM advances a
-    JOIN workers w ON w.id=a.worker_id
-    ORDER BY a.adv_date DESC,a.id DESC
-    LIMIT 500
-    """)
-
-    trs = "".join([
-        f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><a class='btn red' href='/delete-advance/{r['id']}' onclick=\"return confirm('Avans kaydı silinsin mi?')\">Sil</a></td></tr>"
-        for r in data
-    ]) or "<tr><td colspan='6' class='center small'>Avans kaydı yok.</td></tr>"
-
-    by_worker = rows("""
-    SELECT w.id,w.name worker,
-           COALESCE(en.earned,0) earned,
-           COALESCE(ad.amount,0) advance,
-           COALESCE(pa.amount,0) paid,
-           COALESCE(en.earned,0)-COALESCE(ad.amount,0)-COALESCE(pa.amount,0) remaining
-    FROM workers w
-    LEFT JOIN (
-        SELECT worker_id,SUM(qty*worker_price) earned
-        FROM entries
-        GROUP BY worker_id
-    ) en ON en.worker_id=w.id
-    LEFT JOIN (
-        SELECT worker_id,SUM(amount) amount
-        FROM advances
-        GROUP BY worker_id
-    ) ad ON ad.worker_id=w.id
-    LEFT JOIN (
-        SELECT worker_id,SUM(amount) amount
-        FROM payments
-        GROUP BY worker_id
-    ) pa ON pa.worker_id=w.id
-    WHERE w.active=1
-    ORDER BY w.name
-    """)
-
-    sum_tr = "".join([
-        f"<tr><td>{r['worker']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['remaining'])}</td></tr>"
-        for r in by_worker
-    ]) or "<tr><td colspan='5' class='center small'>Eleman yok.</td></tr>"
-
-    body = f"""
-    <div class="kpis three">
-        <div class="kpi"><span>Genel Avans Toplamı</span><b>{money(total)}</b></div>
-        <div class="kpi"><span>Hesap Mantığı</span><b>Hak Edişten Düşer</b></div>
-        <div class="kpi"><span>Kayıt</span><b>Her Giriş Ayrı</b></div>
-    </div>
-
-    <div class="card">
-        <h2>Avans Ekle</h2>
-        <form method="post" action="/add-advance">
-            <div class="grid">
-                <div><label>Tarih</label><input name="adv_date" value="{today()}" required></div>
-                <div><label>Eleman</label><select name="worker_id">{opts}</select></div>
-                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div>
-                <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div>
-            </div>
-            <br><button class="btn green">Avans Kaydet</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h2>Eleman Avans Özeti</h2>
-        <table>
-            <colgroup>
-                <col style="width:24%">
-                <col style="width:19%">
-                <col style="width:19%">
-                <col style="width:19%">
-                <col style="width:19%">
-            </colgroup>
-            <tr>
-                <th>Eleman</th>
-                <th class="right">Hak Ediş</th>
-                <th class="right">Avans</th>
-                <th class="right">Ödenen</th>
-                <th class="right">Kalan</th>
-            </tr>
-            {sum_tr}
-        </table>
-    </div>
-
-    <div class="card">
-        <h2>Tüm Avans Kayıtları</h2>
-        <table>
-            <colgroup>
-                <col style="width:8%">
-                <col style="width:16%">
-                <col style="width:24%">
-                <col style="width:18%">
-                <col style="width:22%">
-                <col style="width:12%">
-            </colgroup>
-            <tr>
-                <th>ID</th>
-                <th>Tarih</th>
-                <th>Eleman</th>
-                <th class="right">Tutar</th>
-                <th>Not</th>
-                <th>İşlem</th>
-            </tr>
-            {trs}
-        </table>
-    </div>
-    """
-    return page("Avanslar", body)
 
 
 @app.post("/add-advance")
@@ -1230,19 +770,19 @@ def add_advance(adv_date: str = Form(...), worker_id: int = Form(...), amount: f
         if amount <= 0:
             raise ValueError()
     except Exception:
-        return RedirectResponse("/advances", status_code=303)
+        return RedirectResponse("/payments", status_code=303)
 
     exec_db("""
         INSERT INTO advances(adv_date,worker_id,amount,note,created_at)
         VALUES(%s,%s,%s,%s,%s)
     """, (adv_date, worker_id, amount, note, now_iso()))
-    return RedirectResponse("/advances", status_code=303)
+    return RedirectResponse("/payments", status_code=303)
 
 
 @app.get("/delete-advance/{aid}")
 def delete_advance(aid: int):
     exec_db("DELETE FROM advances WHERE id=%s", (aid,))
-    return RedirectResponse("/advances", status_code=303)
+    return RedirectResponse("/payments", status_code=303)
 
 
 @app.get("/payments", response_class=HTMLResponse)
@@ -1319,46 +859,44 @@ def payments():
     </div>
 
     <div class="card">
+        <h2>Eleman Avansı</h2>
+        <p class="small">Avans, elemanın hakedişinden düşer. Net kalan = Hakediş - Avans - Ödeme.</p>
+        <form method="post" action="/add-advance">
+            <div class="grid">
+                <div><label>Tarih</label><input name="adv_date" value="{today()}" required></div>
+                <div><label>Eleman</label><select name="worker_id">{opts}</select></div>
+                <div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div>
+                <div style="grid-column:span 2"><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div>
+            </div>
+            <br><button class="btn yellow">Avans Kaydet</button>
+        </form>
+    </div>
+
+    <div class="card">
         <h2>Eleman Ödeme Özeti</h2>
         <table>
-            <colgroup>
-                <col style="width:22%">
-                <col style="width:14%">
-                <col style="width:16%">
-                <col style="width:16%">
-                <col style="width:16%">
-                <col style="width:16%">
-            </colgroup>
             <tr>
-                <th>Eleman</th>
-                <th class="right">Toplam Adet</th>
-                <th class="right">Hak Ediş</th>
-                <th class="right">Avans</th>
-                <th class="right">Ödenen</th>
-                <th class="right">Kalan</th>
+                <th>ÇALIŞAN</th>
+                <th class="right">ADET</th>
+                <th class="right">HAKEDİŞ</th>
+                <th class="right">AVANS</th>
+                <th class="right">ÖDEME</th>
+                <th class="right">NET KALAN</th>
             </tr>
             {worker_rows}
         </table>
     </div>
 
     <div class="card">
-        <h2>Tüm Ödeme Kayıtları</h2>
+        <h2>Ödeme Kayıtları</h2>
         <table>
-            <colgroup>
-                <col style="width:8%">
-                <col style="width:16%">
-                <col style="width:24%">
-                <col style="width:18%">
-                <col style="width:22%">
-                <col style="width:12%">
-            </colgroup>
             <tr>
                 <th>ID</th>
-                <th>Tarih</th>
-                <th>Eleman</th>
-                <th class="right">Tutar</th>
-                <th>Not</th>
-                <th>İşlem</th>
+                <th>TARİH</th>
+                <th>ÇALIŞAN</th>
+                <th class="right">ÖDEME</th>
+                <th>NOT</th>
+                <th>İŞLEM</th>
             </tr>
             {trs}
         </table>
@@ -1408,7 +946,7 @@ def month(m: Optional[str] = None):
     ORDER BY p.name
     """, (like, like))
     ptrs = "".join([f"<tr><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['revenue'] or 0)}</td><td class='right'>{money(r['labor'] or 0)}</td><td class='right'>{money(r['gross'] or 0)}</td></tr>" for r in by_product])
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm["labor_remaining"])}</b><div class="small">Toplam: {money(sm["labor"])}<br>Ödenen: {money(sm["paid"])}<br>Avans: {money(sm["advance"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"><button class="btn green">Hesapla</button><a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm["labor"])}</b><div class="small">Ödenen: {money(sm["paid"])}<br>Kalan: {money(sm["labor_remaining"])}</div></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Eleman Bazlı Ay Sonu</h2><table><tr><th>Eleman</th><th class="right">Toplam Adet</th><th class="right">Hak Ediş</th><th class="right">Avans</th><th class="right">Ödenen</th><th class="right">Kalan</th></tr>{trs}</table></div><div class="card"><h2>Ürün Bazlı Özet</h2><table><tr><th>Ürün</th><th>Firma Teslim Adet</th><th>Firma Hak Ediş</th><th>İşçilik</th><th>Brüt Kazanç</th></tr>{ptrs}</table></div>"""
     return page("Ay Sonu Rapor ve Net Kazanç", body)
 
 
