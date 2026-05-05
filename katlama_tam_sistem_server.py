@@ -360,16 +360,38 @@ def total_summary():
     exp_row = one("SELECT COALESCE(SUM(amount),0) total FROM expenses")
     paid_row = one("SELECT COALESCE(SUM(amount),0) total FROM payments")
 
+    # ANA PANELDEKI İŞÇİLİK KUTUSU:
+    # Alttaki "Son Eleman Kayıtları" tablosunda görünen NET KALAN sütununun genel toplamıdır.
+    labor_box_row = one("""
+        SELECT COALESCE(SUM(x.remaining),0) labor_box
+        FROM (
+            SELECT (e.qty*e.worker_price)-COALESCE(ad.advance,0)-COALESCE(pa.paid,0) remaining
+            FROM entries e
+            LEFT JOIN (
+                SELECT worker_id,adv_date,SUM(amount) advance
+                FROM advances
+                GROUP BY worker_id,adv_date
+            ) ad ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
+            LEFT JOIN (
+                SELECT worker_id,pay_date,SUM(amount) paid
+                FROM payments
+                GROUP BY worker_id,pay_date
+            ) pa ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
+        ) x
+    """)
+
     qty = num(firma["qty"] if firma else 0)
     revenue = num(firma["revenue"] if firma else 0)
     labor = num(labor_row["labor_cost"] if labor_row else 0)
     exp = num(exp_row["total"] if exp_row else 0)
     paid = num(paid_row["total"] if paid_row else 0)
+    labor_box = num(labor_box_row["labor_box"] if labor_box_row else 0)
 
     return {
         "qty": qty,
         "revenue": revenue,
         "labor": labor,
+        "labor_box": labor_box,
         "expense": exp,
         "gross": revenue - labor,
         "net": revenue - labor - exp,
@@ -488,7 +510,7 @@ def dashboard():
     <div class="kpis">
         <div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div>
         <div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div>
-        <div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b><div class="small">Ödenen: {money(sm['paid'])}<br>Kalan: {money(sm['labor_remaining'])}</div></div>
+        <div class="kpi"><span>İşçilik</span><b>{money(sm['labor_box'])}</b></div>
         <div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div>
         <div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div>
     </div>
