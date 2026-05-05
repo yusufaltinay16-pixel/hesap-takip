@@ -129,21 +129,25 @@ def calc_summary(month: Optional[str] = None):
     entry_where = "WHERE work_date LIKE %s" if month else ""
     deliv_where = "WHERE d.deliv_date LIKE %s" if month else ""
     exp_where = "WHERE exp_date LIKE %s" if month else ""
-    pay_where = "WHERE pay_date LIKE %s" if month else ""
-    adv_where = "WHERE adv_date LIKE %s" if month else ""
     p = (month + "%",) if month else ()
-    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty, COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue FROM deliveries d JOIN products p ON p.id=d.product_id {deliv_where}""", p)
+
+    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty,
+                    COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue
+                    FROM deliveries d JOIN products p ON p.id=d.product_id {deliv_where}""", p)
     earned = one(f"SELECT COALESCE(SUM(qty*worker_price),0) total, COALESCE(SUM(qty),0) qty FROM entries {entry_where}", p)
     exp = one(f"SELECT COALESCE(SUM(amount),0) total FROM expenses {exp_where}", p)
-    paid = one(f"SELECT COALESCE(SUM(amount),0) total FROM payments {pay_where}", p)
-    adv = one(f"SELECT COALESCE(SUM(amount),0) total FROM advances {adv_where}", p)
+
+    # ÖNEMLİ DÜZELTME:
+    # Ana paneldeki "İşçilik" kutusu artık ayrı avans/ödeme toplamlarından hesaplanmaz.
+    # Alt taraftaki "Son Eleman Kayıtları" tablosunda görünen NET KALAN sütunlarının toplamı neyse,
+    # üstteki İşçilik kutusuna birebir o rakam yazılır.
+    table_rows = last_entries(limit=100000, month=month)
+    net_kalan = sum(num(r["net_kalan"]) for r in table_rows)
+
     hakedis = num(earned["total"] if earned else 0)
-    odeme = num(paid["total"] if paid else 0)
-    avans = num(adv["total"] if adv else 0)
-    net_kalan = hakedis - avans - odeme
     revenue = num(firma["revenue"] if firma else 0)
     expense = num(exp["total"] if exp else 0)
-    return {"qty": num(firma["qty"] if firma else 0), "revenue": revenue, "worker_qty": num(earned["qty"] if earned else 0), "hakedis": hakedis, "advance": avans, "paid": odeme, "labor": net_kalan, "labor_remaining": net_kalan, "expense": expense, "gross": revenue - hakedis, "net": revenue - net_kalan - expense}
+    return {"qty": num(firma["qty"] if firma else 0), "revenue": revenue, "worker_qty": num(earned["qty"] if earned else 0), "hakedis": hakedis, "advance": 0, "paid": 0, "labor": net_kalan, "labor_remaining": net_kalan, "expense": expense, "gross": revenue - hakedis, "net": revenue - net_kalan - expense}
 
 
 def total_summary(): return calc_summary(None)
