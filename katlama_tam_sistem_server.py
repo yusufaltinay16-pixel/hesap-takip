@@ -144,22 +144,62 @@ def calc_summary(month: Optional[str] = None):
     entry_where = "WHERE work_date LIKE %s" if month else ""
     deliv_where = "WHERE d.deliv_date LIKE %s" if month else ""
     exp_where = "WHERE exp_date LIKE %s" if month else ""
-    pay_where = "WHERE pay_date LIKE %s" if month else ""
-    adv_where = "WHERE adv_date LIKE %s" if month else ""
     p = (month + "%",) if month else ()
-    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty, COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue FROM deliveries d JOIN products p ON p.id=d.product_id {deliv_where}""", p)
+
+    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty,
+                        COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue
+                 FROM deliveries d
+                 JOIN products p ON p.id=d.product_id
+                 {deliv_where}""", p)
+
     earned = one(f"SELECT COALESCE(SUM(qty*worker_price),0) total, COALESCE(SUM(qty),0) qty FROM entries {entry_where}", p)
     exp = one(f"SELECT COALESCE(SUM(amount),0) total FROM expenses {exp_where}", p)
-    paid = one(f"SELECT COALESCE(SUM(amount),0) total FROM payments {pay_where}", p)
-    adv = one(f"SELECT COALESCE(SUM(amount),0) total FROM advances {adv_where}", p)
+
+    # KRITIK DUZELTME:
+    # Ana panel / Ay Sonu / Ortaklar icin ISÇILIK rakami,
+    # ekrandaki "Son Eleman Kayitlari" tablosunda gorunen NET KALAN sutununun toplamidir.
+    # Bu yuzden toplam_hakedis - toplam_avans - toplam_odeme gibi ayri hesap yapmiyoruz.
+    # Aynen alttaki satirlarin NET KALAN mantigini topluyoruz.
+    labor_row = one(f"""
+        SELECT COALESCE(SUM(x.net_kalan),0) AS total
+        FROM (
+            SELECT
+                (e.qty * e.worker_price)
+                - COALESCE(ad.avans,0)
+                - COALESCE(pa.odeme,0) AS net_kalan
+            FROM entries e
+            LEFT JOIN (
+                SELECT worker_id, adv_date, SUM(amount) avans
+                FROM advances
+                GROUP BY worker_id, adv_date
+            ) ad ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
+            LEFT JOIN (
+                SELECT worker_id, pay_date, SUM(amount) odeme
+                FROM payments
+                GROUP BY worker_id, pay_date
+            ) pa ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
+            {entry_where.replace('work_date', 'e.work_date')}
+        ) x
+    """, p)
+
     hakedis = num(earned["total"] if earned else 0)
-    odeme = num(paid["total"] if paid else 0)
-    avans = num(adv["total"] if adv else 0)
-    net_kalan = hakedis - avans - odeme
+    labor = num(labor_row["total"] if labor_row else 0)
     revenue = num(firma["revenue"] if firma else 0)
     expense = num(exp["total"] if exp else 0)
-    return {"qty": num(firma["qty"] if firma else 0), "revenue": revenue, "worker_qty": num(earned["qty"] if earned else 0), "hakedis": hakedis, "advance": avans, "paid": odeme, "labor": net_kalan, "labor_remaining": net_kalan, "expense": expense, "gross": revenue - hakedis, "net": revenue - net_kalan - expense}
 
+    return {
+        "qty": num(firma["qty"] if firma else 0),
+        "revenue": revenue,
+        "worker_qty": num(earned["qty"] if earned else 0),
+        "hakedis": hakedis,
+        "advance": 0,
+        "paid": 0,
+        "labor": labor,
+        "labor_remaining": labor,
+        "expense": expense,
+        "gross": revenue - hakedis,
+        "net": revenue - labor - expense,
+    }
 
 def total_summary(): return calc_summary(None)
 def month_summary(m): return calc_summary(m)
