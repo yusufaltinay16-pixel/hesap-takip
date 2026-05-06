@@ -18,6 +18,13 @@ PORT = int(os.environ.get("PORT", "10000"))
 
 app = FastAPI(title="Katlama Atölyesi Profesyonel Sistem")
 
+# Eski WhatsApp eleman linkleri bozulmasın diye sabit eşleştirme.
+# Bu tokenlar /w/<token> şeklindeki eski linkleri geri çalıştırır.
+LEGACY_WORKER_TOKENS = {
+    "cm8ihMQN2p-2n4eL": "Sevil",
+}
+
+
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
@@ -129,25 +136,21 @@ def calc_summary(month: Optional[str] = None):
     entry_where = "WHERE work_date LIKE %s" if month else ""
     deliv_where = "WHERE d.deliv_date LIKE %s" if month else ""
     exp_where = "WHERE exp_date LIKE %s" if month else ""
+    pay_where = "WHERE pay_date LIKE %s" if month else ""
+    adv_where = "WHERE adv_date LIKE %s" if month else ""
     p = (month + "%",) if month else ()
-
-    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty,
-                    COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue
-                    FROM deliveries d JOIN products p ON p.id=d.product_id {deliv_where}""", p)
+    firma = one(f"""SELECT COALESCE(SUM(d.firm_qty),0) qty, COALESCE(SUM(d.firm_qty*p.firm_price),0) revenue FROM deliveries d JOIN products p ON p.id=d.product_id {deliv_where}""", p)
     earned = one(f"SELECT COALESCE(SUM(qty*worker_price),0) total, COALESCE(SUM(qty),0) qty FROM entries {entry_where}", p)
     exp = one(f"SELECT COALESCE(SUM(amount),0) total FROM expenses {exp_where}", p)
-
-    # ÖNEMLİ DÜZELTME:
-    # Ana paneldeki "İşçilik" kutusu artık ayrı avans/ödeme toplamlarından hesaplanmaz.
-    # Alt taraftaki "Son Eleman Kayıtları" tablosunda görünen NET KALAN sütunlarının toplamı neyse,
-    # üstteki İşçilik kutusuna birebir o rakam yazılır.
-    table_rows = last_entries(limit=100000, month=month)
-    net_kalan = sum(num(r["net_kalan"]) for r in table_rows)
-
+    paid = one(f"SELECT COALESCE(SUM(amount),0) total FROM payments {pay_where}", p)
+    adv = one(f"SELECT COALESCE(SUM(amount),0) total FROM advances {adv_where}", p)
     hakedis = num(earned["total"] if earned else 0)
+    odeme = num(paid["total"] if paid else 0)
+    avans = num(adv["total"] if adv else 0)
+    net_kalan = hakedis - avans - odeme
     revenue = num(firma["revenue"] if firma else 0)
     expense = num(exp["total"] if exp else 0)
-    return {"qty": num(firma["qty"] if firma else 0), "revenue": revenue, "worker_qty": num(earned["qty"] if earned else 0), "hakedis": hakedis, "advance": 0, "paid": 0, "labor": net_kalan, "labor_remaining": net_kalan, "expense": expense, "gross": revenue - hakedis, "net": revenue - net_kalan - expense}
+    return {"qty": num(firma["qty"] if firma else 0), "revenue": revenue, "worker_qty": num(earned["qty"] if earned else 0), "hakedis": hakedis, "advance": avans, "paid": odeme, "labor": net_kalan, "labor_remaining": net_kalan, "expense": expense, "gross": revenue - hakedis, "net": revenue - net_kalan - expense}
 
 
 def total_summary(): return calc_summary(None)
@@ -218,9 +221,16 @@ def workers():
     """)
     trs = ""
     for w in data:
-        path = f"/w/{w['token']}"
+        legacy_token = None
+        for old_token, old_name in LEGACY_WORKER_TOKENS.items():
+            if str(w['name']).strip().lower().startswith(old_name.strip().lower()):
+                legacy_token = old_token
+                break
+        kullanilan_token = legacy_token or w['token']
+        path = f"/w/{kullanilan_token}"
         link = (host + path) if host else path
-        wa = f"https://wa.me/?text={quote('Katlama adet giriş linkin: ' + link)}"
+        mesaj = f"Merhaba {w['name']} ……\n\nKatlama adet giriş linkin:\n{link}\n\nLinke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."
+        wa = f"https://wa.me/?text={quote(mesaj)}"
         trs += f"<tr><td>{w['id']}</td><td>{w['name']}</td><td>{w.get('phone') or ''}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td><div class='copy'>{link}</div></td><td><a class='btn cyan' href='{path}' target='_blank'>Aç</a> <a class='btn green' href='{wa}' target='_blank'>WhatsApp</a> <a class='btn yellow' href='/refresh-worker-token/{w['id']}'>Yeni Link</a> <a class='btn red' href='/delete-worker/{w['id']}' onclick=\"return confirm('Eleman silinsin mi?')\">Sil</a></td></tr>"
     body = f"""
     <div class="card"><h2>Eleman Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Eleman Kaydet</button></form></div>
@@ -293,9 +303,19 @@ def delete_delivery(did: int):
     exec_db("DELETE FROM deliveries WHERE id=%s", (did,)); return RedirectResponse("/deliveries", status_code=303)
 
 
+def get_worker_by_token(token: str):
+    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    if not worker and token in LEGACY_WORKER_TOKENS:
+        legacy_name = LEGACY_WORKER_TOKENS[token]
+        worker = one("SELECT * FROM workers WHERE active=1 AND LOWER(name) LIKE LOWER(%s) ORDER BY id LIMIT 1", (legacy_name + "%",))
+        if not worker:
+            exec_db("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,1,%s) ON CONFLICT(name) DO UPDATE SET token=EXCLUDED.token, active=1", (legacy_name, "", token, now_iso()))
+            worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    return worker
+
 @app.get("/w/{token}", response_class=HTMLResponse)
 def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    worker = get_worker_by_token(token)
     if not worker: return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
     products = rows("SELECT id,name,worker_price FROM products WHERE active=1 ORDER BY name")
     product_opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])
@@ -313,7 +333,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
 
 @app.post("/w/{token}/add")
 def worker_add(token: str, work_date: str = Form(...), product_id: int = Form(...), qty: int = Form(...), note: str = Form("")):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    worker = get_worker_by_token(token)
     product = one("SELECT * FROM products WHERE id=%s AND active=1", (product_id,))
     if not worker or not product or int(qty) <= 0:
         return RedirectResponse(f"/w/{token}?error=Kayıt yapılamadı", status_code=303)
@@ -323,7 +343,7 @@ def worker_add(token: str, work_date: str = Form(...), product_id: int = Form(..
 
 @app.get("/w/{token}/edit/{eid}", response_class=HTMLResponse)
 def worker_edit_form(token: str, eid: int):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    worker = get_worker_by_token(token)
     r = one("SELECT * FROM entries WHERE id=%s", (eid,))
     if not worker or not r or r["worker_id"] != worker["id"]: return RedirectResponse(f"/w/{token}", status_code=303)
     products = rows("SELECT id,name FROM products WHERE active=1 ORDER BY name")
@@ -334,7 +354,7 @@ def worker_edit_form(token: str, eid: int):
 
 @app.post("/w/{token}/edit/{eid}")
 def worker_edit(token: str, eid: int, work_date: str = Form(...), product_id: int = Form(...), qty: int = Form(...), note: str = Form("")):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,)); product = one("SELECT * FROM products WHERE id=%s", (product_id,))
+    worker = get_worker_by_token(token); product = one("SELECT * FROM products WHERE id=%s", (product_id,))
     if worker and product and int(qty) > 0:
         exec_db("UPDATE entries SET work_date=%s, product_id=%s, qty=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s AND worker_id=%s", (work_date, product_id, qty, product["firm_price"], product["worker_price"], note, eid, worker["id"]))
     return RedirectResponse(f"/w/{token}", status_code=303)
@@ -342,7 +362,7 @@ def worker_edit(token: str, eid: int, work_date: str = Form(...), product_id: in
 
 @app.get("/w/{token}/delete/{eid}")
 def worker_delete(token: str, eid: int):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
+    worker = get_worker_by_token(token)
     if worker: exec_db("DELETE FROM entries WHERE id=%s AND worker_id=%s", (eid, worker["id"]))
     return RedirectResponse(f"/w/{token}", status_code=303)
 
