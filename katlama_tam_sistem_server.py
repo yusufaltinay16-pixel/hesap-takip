@@ -18,12 +18,17 @@ PORT = int(os.environ.get("PORT", "10000"))
 
 app = FastAPI(title="Katlama Atölyesi Profesyonel Sistem")
 
-# Eski WhatsApp eleman linkleri bozulmasın diye sabit eşleştirme.
-# Bu tokenlar /w/<token> şeklindeki eski linkleri geri çalıştırır.
-LEGACY_WORKER_TOKENS = {
-    "cm8ihMQN2p-2n4eL": "Sevil",
-}
+# Eleman link sistemi:
+# Her çalışan kendi tokenı ile kişiye özel link alır.
+# Link formatı: https://katlama-sistem.onrender.com/w/<token>
+LEGACY_WORKER_TOKENS = {}
 
+DEFAULT_PUBLIC_BASE_URL = "https://katlama-sistem.onrender.com"
+
+
+def public_base_url():
+    """Eleman linklerini her zaman tıklanabilir tam URL olarak üretir."""
+    return (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
 
 
 def now_iso():
@@ -104,6 +109,9 @@ def init_db():
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' OR token='None'")
     for r in c.fetchall():
         c.execute("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(14), r["id"]))
+
+    # Mevcut tokenlar korunur; tokenı boş olan eski elemanlara yukarıda otomatik kişiye özel link tokenı verilir.
+
     con.commit(); c.close(); con.close()
 
 
@@ -210,7 +218,7 @@ def dashboard():
 
 @app.get("/workers", response_class=HTMLResponse)
 def workers():
-    host = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    host = public_base_url()
     data = rows("""
     SELECT w.*, COALESCE(en.qty,0) qty, COALESCE(en.earned,0) earned, COALESCE(ad.amount,0) avans, COALESCE(pa.amount,0) odeme, COALESCE(en.earned,0)-COALESCE(ad.amount,0)-COALESCE(pa.amount,0) net
     FROM workers w
@@ -228,10 +236,10 @@ def workers():
                 break
         kullanilan_token = legacy_token or w['token']
         path = f"/w/{kullanilan_token}"
-        link = (host + path) if host else path
+        link = host + path
         mesaj = f"Merhaba {w['name']} ……\n\nKatlama adet giriş linkin:\n{link}\n\nLinke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."
         wa = f"https://wa.me/?text={quote(mesaj)}"
-        trs += f"<tr><td>{w['id']}</td><td>{w['name']}</td><td>{w.get('phone') or ''}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td><div class='copy'>{link}</div></td><td><a class='btn cyan' href='{path}' target='_blank'>Aç</a> <a class='btn green' href='{wa}' target='_blank'>WhatsApp</a> <a class='btn yellow' href='/refresh-worker-token/{w['id']}'>Yeni Link</a> <a class='btn red' href='/delete-worker/{w['id']}' onclick=\"return confirm('Eleman silinsin mi?')\">Sil</a></td></tr>"
+        trs += f"<tr><td>{w['id']}</td><td>{w['name']}</td><td>{w.get('phone') or ''}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td><a class='copy' href='{link}' target='_blank'>{link}</a></td><td><a class='btn cyan' href='{link}' target='_blank'>Aç</a> <a class='btn green' href='{wa}' target='_blank'>WhatsApp</a> <a class='btn yellow' href='/refresh-worker-token/{w['id']}'>Yeni Link</a> <a class='btn red' href='/delete-worker/{w['id']}' onclick=\"return confirm('Eleman silinsin mi?')\">Sil</a></td></tr>"
     body = f"""
     <div class="card"><h2>Eleman Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Eleman Kaydet</button></form></div>
     <div class="card"><h2>Eleman Linkleri</h2><div class='table-wrap'><table><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="10" class="center small">Eleman yok.</td></tr>'}</table></div></div>
@@ -243,12 +251,13 @@ def workers():
 def add_worker(name: str = Form(...), phone: str = Form("")):
     name = " ".join(name.strip().split())
     if name:
-        exec_db("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,1,%s) ON CONFLICT(name) DO UPDATE SET phone=EXCLUDED.phone, active=1", (name, phone, secrets.token_urlsafe(14), now_iso()))
+        exec_db("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,1,%s) ON CONFLICT(name) DO UPDATE SET phone=EXCLUDED.phone, active=1, token=COALESCE(NULLIF(workers.token,''), EXCLUDED.token)", (name, phone, secrets.token_urlsafe(14), now_iso()))
     return RedirectResponse("/workers", status_code=303)
 
 
 @app.get("/refresh-worker-token/{wid}")
 def refresh_worker_token(wid: int):
+    # Bu buton sadece seçilen elemanın linkini yeniler. Diğer elemanların linkleri değişmez.
     exec_db("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(14), wid))
     return RedirectResponse("/workers", status_code=303)
 
@@ -304,14 +313,8 @@ def delete_delivery(did: int):
 
 
 def get_worker_by_token(token: str):
-    worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    if not worker and token in LEGACY_WORKER_TOKENS:
-        legacy_name = LEGACY_WORKER_TOKENS[token]
-        worker = one("SELECT * FROM workers WHERE active=1 AND LOWER(name) LIKE LOWER(%s) ORDER BY id LIMIT 1", (legacy_name + "%",))
-        if not worker:
-            exec_db("INSERT INTO workers(name,phone,token,active,created_at) VALUES(%s,%s,%s,1,%s) ON CONFLICT(name) DO UPDATE SET token=EXCLUDED.token, active=1", (legacy_name, "", token, now_iso()))
-            worker = one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
-    return worker
+    # Her link token üzerinden ilgili kişiyi açar.
+    return one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
 
 @app.get("/w/{token}", response_class=HTMLResponse)
 def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None):
