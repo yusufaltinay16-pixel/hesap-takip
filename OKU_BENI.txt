@@ -3,12 +3,13 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from datetime import datetime, date
+from datetime import datetime
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-app = FastAPI()
+app = FastAPI(title="Katlama Tek Panel Sistem")
 
+# ---------------- DB ----------------
 def db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
@@ -16,23 +17,25 @@ def q(sql, params=()):
     con = db()
     cur = con.cursor()
     cur.execute(sql, params)
-    r = cur.fetchall() if cur.description else None
+    res = cur.fetchall() if cur.description else None
     con.commit()
     cur.close()
     con.close()
-    return r
+    return res
 
 def one(sql, params=()):
     con = db()
     cur = con.cursor()
     cur.execute(sql, params)
     r = cur.fetchone()
+    cur.close()
     con.close()
     return r
 
 def now():
     return datetime.now().strftime("%Y-%m-%d")
 
+# ---------------- INIT DB ----------------
 @app.on_event("startup")
 def startup():
     con = db()
@@ -42,14 +45,16 @@ def startup():
     CREATE TABLE IF NOT EXISTS workers(
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE
-    )""")
+    )
+    """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS products(
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE,
         worker_price FLOAT DEFAULT 0
-    )""")
+    )
+    """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS entries(
@@ -59,7 +64,8 @@ def startup():
         product_id INT,
         qty INT,
         worker_price FLOAT
-    )""")
+    )
+    """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS payments(
@@ -67,76 +73,126 @@ def startup():
         pay_date TEXT,
         worker_id INT,
         amount FLOAT
-    )""")
+    )
+    """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS expenses(
         id SERIAL PRIMARY KEY,
         exp_date TEXT,
         amount FLOAT
-    )""")
+    )
+    """)
 
     con.commit()
     con.close()
 
+# ---------------- HOME PANEL ----------------
 @app.get("/", response_class=HTMLResponse)
 def home():
-    workers = q("SELECT * FROM workers ORDER BY id DESC")
-    products = q("SELECT * FROM products ORDER BY id DESC")
+
+    workers = q("SELECT * FROM workers ORDER BY name")
+    products = q("SELECT * FROM products ORDER BY name")
+
+    entries = q("""
+        SELECT e.*, w.name worker, p.name product
+        FROM entries e
+        JOIN workers w ON w.id=e.worker_id
+        JOIN products p ON p.id=e.product_id
+        ORDER BY e.id DESC
+        LIMIT 30
+    """)
+
+    rows = ""
+    for r in entries:
+        rows += f"""
+        <tr>
+            <td>{r['id']}</td>
+            <td>{r['work_date']}</td>
+            <td>{r['worker']}</td>
+            <td>{r['product']}</td>
+            <td>{r['qty']}</td>
+        </tr>
+        """
 
     return f"""
-    <h2>GENEL PANEL</h2>
+    <h2>GENEL KATLAMA PANEL</h2>
+
+    <hr>
 
     <h3>Eleman Ekle</h3>
     <form method="post" action="/add-worker">
-        <input name="name" placeholder="isim">
+        <input name="name" placeholder="eleman adı">
         <button>ekle</button>
     </form>
 
     <h3>Ürün Ekle</h3>
     <form method="post" action="/add-product">
         <input name="name" placeholder="ürün">
-        <input name="price" type="number" step="0.01">
+        <input name="price" type="number" step="0.01" placeholder="işçilik">
         <button>ekle</button>
     </form>
 
     <h3>Kayıt Gir</h3>
     <form method="post" action="/add-entry">
         <input name="work_date" value="{now()}">
+
         <select name="worker_id">
             {''.join([f"<option value='{w['id']}'>{w['name']}</option>" for w in workers])}
         </select>
+
         <select name="product_id">
             {''.join([f"<option value='{p['id']}'>{p['name']}</option>" for p in products])}
         </select>
-        <input name="qty" type="number">
+
+        <input name="qty" type="number" placeholder="adet">
         <button>kaydet</button>
     </form>
 
+    <hr>
+
     <h3>Son Kayıtlar</h3>
-    {q('''
-        SELECT e.*, w.name worker, p.name product
-        FROM entries e
-        JOIN workers w ON w.id=e.worker_id
-        JOIN products p ON p.id=e.product_id
-        ORDER BY e.id DESC LIMIT 30
-    ''')}
+
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>ID</th>
+            <th>Tarih</th>
+            <th>Eleman</th>
+            <th>Ürün</th>
+            <th>Adet</th>
+        </tr>
+        {rows}
+    </table>
     """
 
+# ---------------- WORKER ----------------
 @app.post("/add-worker")
 def add_worker(name: str = Form(...)):
     q("INSERT INTO workers(name) VALUES(%s) ON CONFLICT DO NOTHING", (name,))
     return RedirectResponse("/", 303)
 
+# ---------------- PRODUCT ----------------
 @app.post("/add-product")
 def add_product(name: str = Form(...), price: float = Form(...)):
-    q("INSERT INTO products(name,worker_price) VALUES(%s,%s) ON CONFLICT(name) DO UPDATE SET worker_price=EXCLUDED.worker_price",
-      (name, price))
+    q("""
+        INSERT INTO products(name,worker_price)
+        VALUES(%s,%s)
+        ON CONFLICT(name)
+        DO UPDATE SET worker_price=EXCLUDED.worker_price
+    """, (name, price))
     return RedirectResponse("/", 303)
 
+# ---------------- ENTRY ----------------
 @app.post("/add-entry")
-def add_entry(work_date: str = Form(...), worker_id: int = Form(...), product_id: int = Form(...), qty: int = Form(...)):
+def add_entry(
+    work_date: str = Form(...),
+    worker_id: int = Form(...),
+    product_id: int = Form(...),
+    qty: int = Form(...)
+):
     p = one("SELECT worker_price FROM products WHERE id=%s", (product_id,))
-    q("INSERT INTO entries(work_date,worker_id,product_id,qty,worker_price) VALUES(%s,%s,%s,%s,%s)",
-      (work_date, worker_id, product_id, qty, p["worker_price"]))
+    q("""
+        INSERT INTO entries(work_date,worker_id,product_id,qty,worker_price)
+        VALUES(%s,%s,%s,%s,%s)
+    """, (work_date, worker_id, product_id, qty, p["worker_price"]))
     return RedirectResponse("/", 303)
