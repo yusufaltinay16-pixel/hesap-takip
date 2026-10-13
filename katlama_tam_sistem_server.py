@@ -1,3 +1,4 @@
+
 import os
 import csv
 import socket
@@ -27,8 +28,15 @@ DEFAULT_PUBLIC_BASE_URL = "https://katlama-sistem.onrender.com"
 
 
 def public_base_url():
-    """Eleman linklerini her zaman tıklanabilir tam URL olarak üretir."""
-    return (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
+    """Eleman linklerinde Render'in ozel 10.x adresinin kullanilmasini engeller."""
+    value = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    invalid_values = ("http://10.", "https://10.", "http://127.", "https://127.",
+                      "http://localhost", "https://localhost")
+    if not value or value.lower().startswith(invalid_values):
+        value = DEFAULT_PUBLIC_BASE_URL
+    if not value.startswith(("http://", "https://")):
+        value = "https://" + value
+    return value.rstrip("/")
 
 
 def now_iso():
