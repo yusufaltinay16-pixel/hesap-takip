@@ -106,13 +106,8 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS advances(id SERIAL PRIMARY KEY,adv_date TEXT NOT NULL,worker_id INTEGER NOT NULL REFERENCES workers(id),amount DOUBLE PRECISION NOT NULL,note TEXT,created_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS expenses(id SERIAL PRIMARY KEY,exp_date TEXT NOT NULL,category TEXT NOT NULL,amount DOUBLE PRECISION NOT NULL,note TEXT,created_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS deliveries(id SERIAL PRIMARY KEY,deliv_date TEXT NOT NULL,worker_id INTEGER REFERENCES workers(id),product_id INTEGER NOT NULL REFERENCES products(id),firm_qty INTEGER NOT NULL DEFAULT 0,worker_qty INTEGER NOT NULL DEFAULT 0,note TEXT,created_at TEXT NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS partners(id SERIAL PRIMARY KEY,name TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS partner_advances(id SERIAL PRIMARY KEY,adv_date TEXT NOT NULL,partner_id INTEGER NOT NULL REFERENCES partners(id),amount DOUBLE PRECISION NOT NULL,note TEXT,created_at TEXT NOT NULL)""")
     for name in ["Şal", "Eşarp", "Tekstil Ürün"]:
         c.execute("INSERT INTO products(name,firm_price,worker_price,active,created_at) VALUES(%s,0,0,1,%s) ON CONFLICT(name) DO NOTHING", (name, now_iso()))
-    for pname in ["yusuf altınay", "mine ulu", "emine erol"]:
-        c.execute("INSERT INTO partners(name,active,created_at) VALUES(%s,1,%s) ON CONFLICT(name) DO UPDATE SET active=1", (pname, now_iso()))
-    c.execute("UPDATE partners SET active=0 WHERE name NOT IN ('yusuf altınay','mine ulu','emine erol')")
     c.execute("SELECT id FROM workers WHERE token IS NULL OR token='' OR token='None'")
     for r in c.fetchall():
         c.execute("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(14), r["id"]))
@@ -134,7 +129,7 @@ CSS = """
 def page(title, body, nav=True):
     nav_html = ""
     if nav:
-        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Eleman Linkleri</a><a href="/products">Ürün/Fiyat</a><a href="/expenses">Masraflar</a><a href="/partners">Ortaklar Hesap</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a></div>"""
+        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Eleman Linkleri</a><a href="/products">Ürün/Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a></div>"""
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{title}</h1>{nav_html}</div>{body}</div></body></html>"""
 
 
@@ -164,7 +159,7 @@ def calc_summary(month: Optional[str] = None):
     exp = one(f"SELECT COALESCE(SUM(amount),0) total FROM expenses {exp_where}", p)
 
     # KRITIK DUZELTME:
-    # Ana panel / Ay Sonu / Ortaklar icin ISÇILIK rakami,
+    # Ana panel / Ay Sonu icin ISÇILIK rakami,
     # ekrandaki "Son Eleman Kayitlari" tablosunda gorunen NET KALAN sutununun toplamidir.
     # Bu yuzden toplam_hakedis - toplam_avans - toplam_odeme gibi ayri hesap yapmiyoruz.
     # Aynen alttaki satirlarin NET KALAN mantigini topluyoruz.
@@ -498,32 +493,6 @@ def add_advance(adv_date: str = Form(...), worker_id: int = Form(...), amount: f
 @app.post("/delete-advance/{aid}")
 @app.get("/delete-advance/{aid}")
 def delete_advance(aid: int): exec_db("DELETE FROM advances WHERE id=%s", (aid,)); return RedirectResponse("/payments", status_code=303)
-
-
-@app.get("/partners", response_class=HTMLResponse)
-def partners(m: Optional[str] = None):
-    m = m or this_month(); sm = month_summary(m); net_kar = num(sm["net"]); ortak_pay = net_kar / 3.0
-    plist = rows("""SELECT id,name FROM partners WHERE active=1 AND name IN ('yusuf altınay','mine ulu','emine erol') ORDER BY CASE name WHEN 'yusuf altınay' THEN 1 WHEN 'mine ulu' THEN 2 WHEN 'emine erol' THEN 3 ELSE 4 END""")
-    opts = "".join([f"<option value='{p['id']}'>{p['name']}</option>" for p in plist])
-    partner_rows = ""
-    for p in plist:
-        adv = num(one("SELECT COALESCE(SUM(amount),0) total FROM partner_advances WHERE partner_id=%s AND adv_date LIKE %s", (p["id"], m+"%"))["total"])
-        partner_rows += f"<tr><td>{p['name']}</td><td class='right'>{money(ortak_pay)}</td><td class='right'>{money(adv)}</td><td class='right'>{money(ortak_pay-adv)}</td></tr>"
-    advdata = rows("""SELECT pa.id,pa.adv_date,p.name partner,pa.amount,COALESCE(pa.note,'') note FROM partner_advances pa JOIN partners p ON p.id=pa.partner_id WHERE pa.adv_date LIKE %s ORDER BY pa.adv_date DESC,pa.id DESC""", (m+"%",))
-    adv_rows = "".join([f"<tr><td>{r['id']}</td><td>{r['adv_date']}</td><td>{r['partner']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><form method='post' action='/delete-partner-advance/{r['id']}?m={m}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in advdata]) or "<tr><td colspan='6' class='center small'>Avans yok.</td></tr>"
-    body = f"""<div class="card"><form method="get" action="/partners"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"> <button class="btn green">Hesapla</button></form></div><div class="kpis three"><div class="kpi"><span>Net Kalan Toplam Kar</span><b>{money(net_kar)}</b></div><div class="kpi"><span>Ortak Sayısı</span><b>3</b></div><div class="kpi"><span>Kişi Başı Pay</span><b>{money(ortak_pay)}</b></div></div><div class="card"><h2>Ortak Avansı Gir</h2><form method="post" action="/add-partner-advance"><input type="hidden" name="m" value="{m}"><div class="grid"><div><label>Tarih</label><input name="adv_date" value="{today()}" required></div><div><label>Ortak</label><select name="partner_id">{opts}</select></div><div><label>Avans</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Kaydet</button></form></div><div class="card"><h2>Ortaklar Hesap Özeti</h2><table><tr><th>ORTAK</th><th class='right'>PAY</th><th class='right'>AVANS</th><th class='right'>NET KALAN</th></tr>{partner_rows}</table></div><div class="card"><h2>Ortak Avans Kayıtları</h2><table><tr><th>ID</th><th>TARİH</th><th>ORTAK</th><th class='right'>AVANS</th><th>NOT</th><th>İŞLEM</th></tr>{adv_rows}</table></div>"""
-    return page("Ortaklar Hesap", body)
-
-
-@app.post("/add-partner-advance")
-def add_partner_advance(m: str = Form(...), adv_date: str = Form(...), partner_id: int = Form(...), amount: float = Form(...), note: str = Form("")):
-    exec_db("INSERT INTO partner_advances(adv_date,partner_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (adv_date, partner_id, amount, note, now_iso())); return RedirectResponse(f"/partners?m={m}", status_code=303)
-
-
-@app.post("/delete-partner-advance/{aid}")
-@app.get("/delete-partner-advance/{aid}")
-def delete_partner_advance(aid: int, m: Optional[str] = None):
-    exec_db("DELETE FROM partner_advances WHERE id=%s", (aid,)); return RedirectResponse(f"/partners?m={m or this_month()}", status_code=303)
 
 
 @app.get("/month", response_class=HTMLResponse)
