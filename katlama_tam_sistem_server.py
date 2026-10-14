@@ -349,6 +349,8 @@ def delete_worker(wid: int):
 def products(error: Optional[str] = None):
     firms = rows("SELECT * FROM firms WHERE active=1 ORDER BY name")
     data = rows("""SELECT p.*,f.name firm_name FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.active=1 ORDER BY f.name,p.name""")
+    deleted_products = rows("""SELECT p.id,p.name,f.name firm_name FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.active=0 ORDER BY f.name,p.name""")
+    deleted_work_types = rows("""SELECT wt.id,wt.name,p.name product_name,f.name firm_name FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id WHERE wt.active=0 ORDER BY f.name,p.name,wt.name""")
     work_types = rows("""SELECT wt.*,p.name product_name,p.firm_price,f.name firm_name,
                         (SELECT COALESCE(SUM(x.worker_price),0) FROM work_types x WHERE x.product_id=wt.product_id AND x.active=1) total_labor
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
@@ -377,6 +379,9 @@ def products(error: Optional[str] = None):
             profit_trs += f"<tr><td>{p['firm_name']}</td><td>{p['product_name']}</td><td>{package_text}</td><td class='right'>{money(p['firm_price'])}</td><td class='right'>{money(labor_per_piece)}</td><td class='right'>{money(profit_per_piece)}</td></tr>"
     if not profit_trs:
         profit_trs = "<tr><td colspan='6' class='center small'>Ürün veya işçilik kaydı yok.</td></tr>"
+    deleted_product_trs = "".join([f"<tr><td>{p['firm_name']}</td><td>Ürün</td><td>{p['name']}</td><td><form method='post' action='/restore-product/{p['id']}'><button class='btn green'>Geri Getir</button></form></td></tr>" for p in deleted_products])
+    deleted_work_trs = "".join([f"<tr><td>{w['firm_name']}</td><td>İşçilik</td><td>{w['product_name']} — {w['name']}</td><td><form method='post' action='/restore-work-type/{w['id']}'><button class='btn green'>Geri Getir</button></form></td></tr>" for w in deleted_work_types])
+    deleted_trs = deleted_product_trs + deleted_work_trs or "<tr><td colspan='4' class='center small'>Geri getirilecek silinmiş kayıt yok.</td></tr>"
     error_box = f"<div class='bad'>{error}</div>" if error else ""
     body = f"""{error_box}
     <div class="card"><h2>1. Firma Ekle</h2><form method="post" action="/save-firm"><div class="grid"><div><label>Firma Adı</label><input name="name" required></div></div><br><button class="btn green">Firmayı Kaydet</button></form><br><table><tr><th>ID</th><th>FİRMA</th></tr>{firm_trs}</table></div>
@@ -385,6 +390,7 @@ def products(error: Optional[str] = None):
     <div class="card"><h2>Adet Başı İşçilik ve Kâr Karşılaştırması</h2><p class='small'>Toplam işçilik, bütün adet başı işlerin toplamına paket ücretinin paket içindeki ürün sayısına düşen payı eklenerek hesaplanır.</p><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>PAKET TÜRÜ</th><th class='right'>FİRMADAN ALINAN / ADET</th><th class='right'>İŞÇİYE VERİLEN / ADET</th><th class='right'>SİZE KALAN / ADET</th></tr>{profit_trs}</table></div>
     <div class="card"><h2>3. İşçiye Verilen İşleri Bölüştür</h2><form method="post" action="/save-work-type"><div class="grid"><div><label>Hangi Firma / Ürün?</label><select name="product_id" required>{opts}</select></div><div><label>Yapılan İş</label><input name="name" placeholder="Örnek: Şal Çoklu Paketleme" required></div><div><label>Ücret Nasıl Hesaplansın?</label><select name="pay_basis"><option value="piece">Ürün adedi başına</option><option value="package">Paket başına</option></select></div><div><label>İşçiye Verilen Ücret</label><input name="worker_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">İşçilik Aşamasını Kaydet</button></form><p class='small'>Çoklu paketlemede “Paket başına” seçin. Eleman paket sayısını ve 3'lü, 6'lı veya 7'li olduğunu seçer.</p></div>
     <div class="card"><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>İŞÇİLİK AŞAMASI</th><th>HESAPLAMA</th><th class='right'>İŞÇİ ÜCRETİ</th><th>İŞLEM</th></tr>{wt_trs}</table></div>
+    <div class="card"><h2>Silinen Kayıtları Geri Getir</h2><p class='small'>Yanlışlıkla sildiğiniz kaydın karşısındaki yeşil “Geri Getir” düğmesine basın.</p><table><tr><th>FİRMA</th><th>TÜR</th><th>KAYIT</th><th>İŞLEM</th></tr>{deleted_trs}</table></div>
     """
     return page("Firma / Ürün / Fiyat", body)
 
@@ -435,10 +441,22 @@ def delete_work_type(wid: int):
     return RedirectResponse("/products", status_code=303)
 
 
+@app.post("/restore-work-type/{wid}")
+def restore_work_type(wid: int):
+    exec_db("UPDATE work_types SET active=1 WHERE id=%s", (wid,))
+    return RedirectResponse("/products", status_code=303)
+
+
 @app.post("/delete-product/{pid}")
 @app.get("/delete-product/{pid}")
 def delete_product(pid: int):
     exec_db("UPDATE products SET active=0 WHERE id=%s", (pid,))
+    return RedirectResponse("/products", status_code=303)
+
+
+@app.post("/restore-product/{pid}")
+def restore_product(pid: int):
+    exec_db("UPDATE products SET active=1 WHERE id=%s", (pid,))
     return RedirectResponse("/products", status_code=303)
 
 
