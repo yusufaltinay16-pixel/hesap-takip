@@ -101,10 +101,12 @@ def init_db():
     con = db(); c = con.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS workers(id SERIAL PRIMARY KEY,name TEXT NOT NULL UNIQUE,phone TEXT,token TEXT UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS firms(id SERIAL PRIMARY KEY,name TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
-    c.execute("""INSERT INTO firms(name,active,created_at) VALUES('Genel Firma',1,%s) ON CONFLICT(name) DO NOTHING""", (now_iso(),))
+    c.execute("""UPDATE firms SET name='TEMA KONFEKSİYON' WHERE name='Genel Firma'
+                 AND NOT EXISTS(SELECT 1 FROM firms WHERE name='TEMA KONFEKSİYON')""")
+    c.execute("""INSERT INTO firms(name,active,created_at) VALUES('TEMA KONFEKSİYON',1,%s) ON CONFLICT(name) DO UPDATE SET active=1""", (now_iso(),))
     c.execute("""CREATE TABLE IF NOT EXISTS products(id SERIAL PRIMARY KEY,name TEXT NOT NULL,firm_id INTEGER REFERENCES firms(id),firm_price DOUBLE PRECISION NOT NULL DEFAULT 0,worker_price DOUBLE PRECISION NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS firm_id INTEGER REFERENCES firms(id)")
-    c.execute("UPDATE products SET firm_id=(SELECT id FROM firms WHERE name='Genel Firma') WHERE firm_id IS NULL")
+    c.execute("UPDATE products SET firm_id=(SELECT id FROM firms WHERE name='TEMA KONFEKSİYON') WHERE firm_id IS NULL")
     c.execute("ALTER TABLE products ALTER COLUMN firm_id SET NOT NULL")
     c.execute("ALTER TABLE products DROP CONSTRAINT IF EXISTS products_name_key")
     c.execute("""DO $$ BEGIN
@@ -112,6 +114,14 @@ def init_db():
             ALTER TABLE products ADD CONSTRAINT products_firm_name_key UNIQUE(firm_id,name);
         END IF;
     END $$""")
+    c.execute("""UPDATE products p SET firm_id=(SELECT id FROM firms WHERE name='TEMA KONFEKSİYON')
+                 WHERE p.firm_id IN (SELECT id FROM firms WHERE name='Genel Firma')
+                 AND NOT EXISTS(
+                    SELECT 1 FROM products x
+                    WHERE x.firm_id=(SELECT id FROM firms WHERE name='TEMA KONFEKSİYON') AND x.name=p.name AND x.id<>p.id
+                 )""")
+    c.execute("""UPDATE firms SET active=0 WHERE name='Genel Firma'
+                 AND NOT EXISTS(SELECT 1 FROM products WHERE firm_id=firms.id)""")
     c.execute("""CREATE TABLE IF NOT EXISTS work_types(id SERIAL PRIMARY KEY,product_id INTEGER NOT NULL REFERENCES products(id),name TEXT NOT NULL,worker_price DOUBLE PRECISION NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,UNIQUE(product_id,name))""")
     c.execute("""CREATE TABLE IF NOT EXISTS entries(id SERIAL PRIMARY KEY,work_date TEXT NOT NULL,worker_id INTEGER NOT NULL REFERENCES workers(id),product_id INTEGER NOT NULL REFERENCES products(id),qty INTEGER NOT NULL,firm_price DOUBLE PRECISION NOT NULL,worker_price DOUBLE PRECISION NOT NULL,note TEXT,created_at TEXT NOT NULL,source TEXT DEFAULT 'telefon')""")
     c.execute("""CREATE TABLE IF NOT EXISTS payments(id SERIAL PRIMARY KEY,pay_date TEXT NOT NULL,worker_id INTEGER NOT NULL REFERENCES workers(id),amount DOUBLE PRECISION NOT NULL,note TEXT,created_at TEXT NOT NULL)""")
@@ -121,7 +131,7 @@ def init_db():
     c.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS work_type_id INTEGER REFERENCES work_types(id)")
     c.execute("ALTER TABLE work_types ADD COLUMN IF NOT EXISTS pay_basis TEXT NOT NULL DEFAULT 'piece'")
     c.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS package_size INTEGER NOT NULL DEFAULT 1")
-    default_firm = c.execute("SELECT id FROM firms WHERE name='Genel Firma'")
+    default_firm = c.execute("SELECT id FROM firms WHERE name='TEMA KONFEKSİYON'")
     default_firm_id = c.fetchone()["id"]
     for name in ["Şal", "Eşarp", "Tekstil Ürün"]:
         c.execute("INSERT INTO products(name,firm_id,firm_price,worker_price,active,created_at) VALUES(%s,%s,0,0,1,%s) ON CONFLICT(firm_id,name) DO NOTHING", (name, default_firm_id, now_iso()))
@@ -343,6 +353,12 @@ def products(error: Optional[str] = None):
                         (SELECT COALESCE(SUM(x.worker_price),0) FROM work_types x WHERE x.product_id=wt.product_id AND x.active=1) total_labor
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
                         WHERE wt.active=1 AND p.active=1 ORDER BY f.name,p.name,wt.name""")
+    profit_data = rows("""SELECT f.name firm_name,p.name product_name,p.firm_price,
+                          COALESCE(SUM(CASE WHEN wt.pay_basis='piece' AND wt.active=1 THEN wt.worker_price ELSE 0 END),0) piece_labor,
+                          COALESCE(SUM(CASE WHEN wt.pay_basis='package' AND wt.active=1 THEN wt.worker_price ELSE 0 END),0) package_labor
+                          FROM products p JOIN firms f ON f.id=p.firm_id
+                          LEFT JOIN work_types wt ON wt.product_id=p.id
+                          WHERE p.active=1 GROUP BY f.name,p.id,p.name,p.firm_price ORDER BY f.name,p.name""")
     def product_row(p):
         move_opts = "".join([f"<option value='{f['id']}' {'selected' if f['id']==p['firm_id'] else ''}>{f['name']}</option>" for f in firms])
         return f"<tr><td>{p['id']}</td><td>{p['firm_name']}</td><td>{p['name']}</td><td class='right'>{money(p['firm_price'])}</td><td><form method='post' action='/move-product-firm/{p['id']}'><select name='firm_id'>{move_opts}</select><button class='btn yellow' type='submit'>Firmayı Değiştir</button></form><form method='post' action='/delete-product/{p['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>"
@@ -351,11 +367,22 @@ def products(error: Optional[str] = None):
     opts = "".join([f"<option value='{p['id']}'>{p['firm_name']} — {p['name']} — Firma fiyatı {money(p['firm_price'])}</option>" for p in data])
     firm_opts = "".join([f"<option value='{f['id']}'>{f['name']}</option>" for f in firms])
     firm_trs = "".join([f"<tr><td>{f['id']}</td><td>{f['name']}</td></tr>" for f in firms])
+    profit_trs = ""
+    for p in profit_data:
+        pack_sizes = (3,6,7) if num(p['package_labor']) > 0 else (1,)
+        for pack_size in pack_sizes:
+            labor_per_piece = num(p['piece_labor']) + (num(p['package_labor']) / pack_size if pack_size > 1 else 0)
+            profit_per_piece = num(p['firm_price']) - labor_per_piece
+            package_text = f"{pack_size}'lü paket" if pack_size > 1 else "Paket işi yok"
+            profit_trs += f"<tr><td>{p['firm_name']}</td><td>{p['product_name']}</td><td>{package_text}</td><td class='right'>{money(p['firm_price'])}</td><td class='right'>{money(labor_per_piece)}</td><td class='right'>{money(profit_per_piece)}</td></tr>"
+    if not profit_trs:
+        profit_trs = "<tr><td colspan='6' class='center small'>Ürün veya işçilik kaydı yok.</td></tr>"
     error_box = f"<div class='bad'>{error}</div>" if error else ""
     body = f"""{error_box}
     <div class="card"><h2>1. Firma Ekle</h2><form method="post" action="/save-firm"><div class="grid"><div><label>Firma Adı</label><input name="name" required></div></div><br><button class="btn green">Firmayı Kaydet</button></form><br><table><tr><th>ID</th><th>FİRMA</th></tr>{firm_trs}</table></div>
     <div class="card"><h2>2. Firmadan Alınan Ürün ve Fiyatı</h2><form method="post" action="/save-product"><div class="grid"><div><label>Firma</label><select name="firm_id" required>{firm_opts}</select></div><div><label>Ürün (örnek: Şal)</label><input name="name" required></div><div><label>Firmadan Alınan Birim Fiyat</label><input name="firm_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">Ürünü Kaydet / Güncelle</button></form><p class='small'>Bu fiyat ürünün tamamı içindir; her işçilik aşamasında yeniden hesaplanmaz.</p></div>
     <div class="card"><table><tr><th>ID</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>FİRMADAN ALINAN FİYAT</th><th>İŞLEM</th></tr>{trs}</table></div>
+    <div class="card"><h2>Adet Başı İşçilik ve Kâr Karşılaştırması</h2><p class='small'>Toplam işçilik, bütün adet başı işlerin toplamına paket ücretinin paket içindeki ürün sayısına düşen payı eklenerek hesaplanır.</p><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>PAKET TÜRÜ</th><th class='right'>FİRMADAN ALINAN / ADET</th><th class='right'>İŞÇİYE VERİLEN / ADET</th><th class='right'>SİZE KALAN / ADET</th></tr>{profit_trs}</table></div>
     <div class="card"><h2>3. İşçiye Verilen İşleri Bölüştür</h2><form method="post" action="/save-work-type"><div class="grid"><div><label>Hangi Firma / Ürün?</label><select name="product_id" required>{opts}</select></div><div><label>Yapılan İş</label><input name="name" placeholder="Örnek: Şal Çoklu Paketleme" required></div><div><label>Ücret Nasıl Hesaplansın?</label><select name="pay_basis"><option value="piece">Ürün adedi başına</option><option value="package">Paket başına</option></select></div><div><label>İşçiye Verilen Ücret</label><input name="worker_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">İşçilik Aşamasını Kaydet</button></form><p class='small'>Çoklu paketlemede “Paket başına” seçin. Eleman paket sayısını ve 3'lü, 6'lı veya 7'li olduğunu seçer.</p></div>
     <div class="card"><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>İŞÇİLİK AŞAMASI</th><th>HESAPLAMA</th><th class='right'>İŞÇİ ÜCRETİ</th><th>İŞLEM</th></tr>{wt_trs}</table></div>
     """
