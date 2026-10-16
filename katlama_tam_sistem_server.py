@@ -139,10 +139,10 @@ def init_db():
     c.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS work_type_id INTEGER REFERENCES work_types(id)")
     c.execute("ALTER TABLE work_types ADD COLUMN IF NOT EXISTS pay_basis TEXT NOT NULL DEFAULT 'piece'")
     c.execute("ALTER TABLE work_types ADD COLUMN IF NOT EXISTS counts_product INTEGER NOT NULL DEFAULT 0")
-    c.execute("""UPDATE work_types wt SET counts_product=CASE WHEN wt.id=(
-                    SELECT MIN(x.id) FROM work_types x WHERE x.product_id=wt.product_id AND LOWER(x.name) LIKE '%katlama%'
-                 ) THEN 1 ELSE 0 END
-                 WHERE LOWER(wt.name) LIKE '%katlama%'""")
+    c.execute("""UPDATE work_types wt SET counts_product=1
+                 WHERE LOWER(wt.name) LIKE '%katlama%'
+                   AND wt.id=(SELECT MIN(x.id) FROM work_types x WHERE x.product_id=wt.product_id AND LOWER(x.name) LIKE '%katlama%')
+                   AND NOT EXISTS(SELECT 1 FROM work_types y WHERE y.product_id=wt.product_id AND y.counts_product=1)""")
     c.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS package_size INTEGER NOT NULL DEFAULT 1")
     default_firm = c.execute("SELECT id FROM firms WHERE name='TEMA KONFEKSİYON'")
     default_firm_id = c.fetchone()["id"]
@@ -325,8 +325,8 @@ def dashboard():
     body = f"""
     <div class="card"><div class="notice">Ana panel tarih aralığı kullanmaz. İşçilik kutusu alttaki NET KALAN sütununun toplamıdır.</div></div>
     <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
-    <div class="card"><h2>Firma Teslimi ve Katlanan Ürün</h2><p class='small'>Ürün adedi yalnızca katlama kayıtlarından hesaplanır. Paket, cırt ve diğer işçilikler ürün adedine eklenmez.</p><table><tr><th>Firma</th><th>Ürün</th><th class='right'>Firma Teslim Adet</th><th class='right'>Katlanan Ürün Adedi</th><th class='right'>Fark</th></tr>{comp}</table></div>
-    <div class="card"><h2>İşçilik Adet Kontrolü</h2><p class='small'>Her işin adedi katlama adediyle karşılaştırılır. Fark sıfırsa doğru, artıysa fazla, eksiyse eksik girilmiştir.</p><table><tr><th>Firma</th><th>Ürün</th><th>Yapılan İş</th><th class='right'>Katlama Adedi</th><th class='right'>Girilen İş Adedi</th><th class='right'>Fark</th><th>Durum</th></tr>{stage_trs}</table></div>
+    <div class="card"><h2>Firma Teslimi ve Ana Ürün Adedi</h2><p class='small'>Her ürün için seçtiğiniz “Ana Adet” işi gerçek ürün adedi kabul edilir.</p><table><tr><th>Firma</th><th>Ürün</th><th class='right'>Firma Teslim Adet</th><th class='right'>Ana İş Adedi</th><th class='right'>Fark</th></tr>{comp}</table></div>
+    <div class="card"><h2>İşçilik Adet Kontrolü</h2><p class='small'>Her işin adedi, o firma ve ürün için seçtiğiniz ana işin adediyle karşılaştırılır. Fark sıfırsa doğru, artıysa fazla, eksiyse eksik girilmiştir.</p><table><tr><th>Firma</th><th>Ürün</th><th>Yapılan İş</th><th class='right'>Ana İş Adedi</th><th class='right'>Girilen İş Adedi</th><th class='right'>Fark</th><th>Durum</th></tr>{stage_trs}</table></div>
     <div class="card"><h2>Son Eleman Kayıtları</h2>{entries_table(last_entries())}</div>
     """
     return page("Katlama Atölyesi Ana Panel", body)
@@ -406,7 +406,7 @@ def products(error: Optional[str] = None):
         move_opts = "".join([f"<option value='{f['id']}' {'selected' if f['id']==p['firm_id'] else ''}>{f['name']}</option>" for f in firms])
         return f"<tr><td>{p['id']}</td><td>{p['firm_name']}</td><td>{p['name']}</td><td class='right'>{money(p['firm_price'])}</td><td><form method='post' action='/move-product-firm/{p['id']}'><select name='firm_id'>{move_opts}</select><button class='btn yellow' type='submit'>Firmayı Değiştir</button></form><form method='post' action='/delete-product/{p['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>"
     trs = "".join([product_row(p) for p in data]) or "<tr><td colspan='5' class='center small'>Ürün yok.</td></tr>"
-    wt_trs = "".join([f"<tr><td>{w['firm_name']}</td><td>{w['product_name']}</td><td>{w['name']}</td><td>{'Ana ürün adedi / Katlama' if w['counts_product']==1 else ('Paket başına işçilik' if w['pay_basis']=='package' else 'Adet başına işçilik')}</td><td class='right'>{money(w['worker_price'])}</td><td><form method='post' action='/delete-work-type/{w['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for w in work_types]) or "<tr><td colspan='6' class='center small'>Henüz işçilik aşaması yok.</td></tr>"
+    wt_trs = "".join([f"<tr><td>{w['firm_name']}</td><td>{w['product_name']}</td><td>{w['name']}</td><td>{'ANA ADET' if w['counts_product']==1 else ('Paket başına işçilik' if w['pay_basis']=='package' else 'Adet başına işçilik')}</td><td class='right'>{money(w['worker_price'])}</td><td>{'<span class=\"diff-zero\">ANA ADET SEÇİLİ</span>' if w['counts_product']==1 else f'<form method=\"post\" action=\"/set-main-work/{w["id"]}\" style=\"display:inline\"><button class=\"btn green\" type=\"submit\">Ana Adet Yap</button></form>'} <form method='post' action='/delete-work-type/{w['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for w in work_types]) or "<tr><td colspan='6' class='center small'>Henüz işçilik aşaması yok.</td></tr>"
     opts = "".join([f"<option value='{p['id']}'>{p['firm_name']} — {p['name']} — Firma fiyatı {money(p['firm_price'])}</option>" for p in data])
     firm_opts = "".join([f"<option value='{f['id']}'>{f['name']}</option>" for f in firms])
     firm_trs = "".join([f"<tr><td>{f['id']}</td><td>{f['name']}</td></tr>" for f in firms])
@@ -468,9 +468,8 @@ def save_work_type(product_id: int = Form(...), name: str = Form(...), pay_basis
     current = one("SELECT COALESCE(SUM(worker_price),0) total FROM work_types WHERE product_id=%s AND active=1 AND pay_basis='piece' AND name<>%s", (product_id, name))
     price_is_valid = basis == "package" or num(current["total"]) + worker_price <= num(product["firm_price"] if product else 0)
     if product and name and price_is_valid:
-        counts_product = 1 if "katlama" in name.lower() else 0
-        if counts_product:
-            exec_db("UPDATE work_types SET counts_product=0 WHERE product_id=%s", (product_id,))
+        existing_main = one("SELECT id FROM work_types WHERE product_id=%s AND counts_product=1 LIMIT 1", (product_id,))
+        counts_product = 1 if (not existing_main and "katlama" in name.lower()) else 0
         exec_db("""INSERT INTO work_types(product_id,name,worker_price,pay_basis,counts_product,active,created_at) VALUES(%s,%s,%s,%s,%s,1,%s)
                    ON CONFLICT(product_id,name) DO UPDATE SET worker_price=EXCLUDED.worker_price,pay_basis=EXCLUDED.pay_basis,counts_product=EXCLUDED.counts_product,active=1""",
                 (product_id, name, worker_price, basis, counts_product, now_iso()))
@@ -482,6 +481,15 @@ def save_work_type(product_id: int = Form(...), name: str = Form(...), pay_basis
 @app.get("/delete-work-type/{wid}")
 def delete_work_type(wid: int):
     exec_db("UPDATE work_types SET active=0 WHERE id=%s", (wid,))
+    return RedirectResponse("/products", status_code=303)
+
+
+@app.post("/set-main-work/{wid}")
+def set_main_work(wid: int):
+    selected = one("SELECT product_id FROM work_types WHERE id=%s AND active=1", (wid,))
+    if selected:
+        exec_db("UPDATE work_types SET counts_product=0 WHERE product_id=%s", (selected["product_id"],))
+        exec_db("UPDATE work_types SET counts_product=1 WHERE id=%s", (wid,))
     return RedirectResponse("/products", status_code=303)
 
 
