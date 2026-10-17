@@ -18,6 +18,16 @@ PORT = int(os.environ.get("PORT", "10000"))
 
 app = FastAPI(title="Katlama Atölyesi Profesyonel Sistem")
 
+
+@app.middleware("http")
+async def disable_page_cache(request: Request, call_next):
+    """Silinen veya güncellenen kayıtların telefonda eski haliyle kalmasını engeller."""
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 # Eleman link sistemi:
 # Her çalışan kendi tokenı ile kişiye özel link alır.
 # Link formatı: https://katlama-sistem.onrender.com/w/<token>
@@ -203,36 +213,15 @@ def calc_summary(month: Optional[str] = None):
                          JOIN work_types wt ON wt.id=e.work_type_id AND wt.counts_product=1
                          {production_where}""", p)
     exp = one(f"SELECT COALESCE(SUM(amount),0) total FROM expenses {exp_where}", p)
-
-    # KRITIK DUZELTME:
-    # Ana panel / Ay Sonu icin ISÇILIK rakami,
-    # ekrandaki "Son Eleman Kayitlari" tablosunda gorunen NET KALAN sutununun toplamidir.
-    # Bu yuzden toplam_hakedis - toplam_avans - toplam_odeme gibi ayri hesap yapmiyoruz.
-    # Aynen alttaki satirlarin NET KALAN mantigini topluyoruz.
-    labor_row = one(f"""
-        SELECT COALESCE(SUM(x.net_kalan),0) AS total
-        FROM (
-            SELECT
-                (e.qty * e.worker_price)
-                - COALESCE(ad.avans,0)
-                - COALESCE(pa.odeme,0) AS net_kalan
-            FROM entries e
-            LEFT JOIN (
-                SELECT worker_id, adv_date, SUM(amount) avans
-                FROM advances
-                GROUP BY worker_id, adv_date
-            ) ad ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
-            LEFT JOIN (
-                SELECT worker_id, pay_date, SUM(amount) odeme
-                FROM payments
-                GROUP BY worker_id, pay_date
-            ) pa ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
-            {entry_where.replace('work_date', 'e.work_date')}
-        ) x
-    """, p)
+    advance_where = "WHERE adv_date LIKE %s" if month else ""
+    payment_where = "WHERE pay_date LIKE %s" if month else ""
+    advance_row = one(f"SELECT COALESCE(SUM(amount),0) total FROM advances {advance_where}", p)
+    payment_row = one(f"SELECT COALESCE(SUM(amount),0) total FROM payments {payment_where}", p)
 
     hakedis = num(earned["total"] if earned else 0)
-    labor = num(labor_row["total"] if labor_row else 0)
+    advance = num(advance_row["total"] if advance_row else 0)
+    paid = num(payment_row["total"] if payment_row else 0)
+    labor = hakedis - advance - paid
     revenue = num(firma["revenue"] if firma else 0)
     expense = num(exp["total"] if exp else 0)
 
@@ -241,8 +230,8 @@ def calc_summary(month: Optional[str] = None):
         "revenue": revenue,
         "worker_qty": num(production["qty"] if production else 0),
         "hakedis": hakedis,
-        "advance": 0,
-        "paid": 0,
+        "advance": advance,
+        "paid": paid,
         "labor": labor,
         "labor_remaining": labor,
         "expense": expense,
@@ -263,19 +252,24 @@ def last_entries(limit=300, month: Optional[str] = None):
     where = "WHERE e.work_date LIKE %s" if month else ""
     p = (month + "%", limit) if month else (limit,)
     return rows(f"""
-    SELECT e.id,e.work_date,w.name worker,COALESCE(wt.name,p.name) product,e.qty,
+    WITH ranked AS (
+        SELECT e.*,ROW_NUMBER() OVER(PARTITION BY e.worker_id,e.work_date ORDER BY e.id) rn
+        FROM entries e {where}
+    )
+    SELECT e.id,e.work_date,w.name worker,COALESCE(wt.name,pr.name) product,e.qty,
            e.qty*e.worker_price hakedis,
-           COALESCE(ad.avans,0) avans,
-           COALESCE(pa.odeme,0) odeme,
-           (e.qty*e.worker_price)-COALESCE(ad.avans,0)-COALESCE(pa.odeme,0) net_kalan,
+           CASE WHEN e.rn=1 THEN COALESCE(ad.avans,0) ELSE 0 END avans,
+           CASE WHEN e.rn=1 THEN COALESCE(pa.odeme,0) ELSE 0 END odeme,
+           (e.qty*e.worker_price)
+             - CASE WHEN e.rn=1 THEN COALESCE(ad.avans,0) ELSE 0 END
+             - CASE WHEN e.rn=1 THEN COALESCE(pa.odeme,0) ELSE 0 END net_kalan,
            COALESCE(e.note,'') note
-    FROM entries e
+    FROM ranked e
     JOIN workers w ON w.id=e.worker_id
-    JOIN products p ON p.id=e.product_id
+    JOIN products pr ON pr.id=e.product_id
     LEFT JOIN work_types wt ON wt.id=e.work_type_id
     LEFT JOIN (SELECT worker_id,adv_date,SUM(amount) avans FROM advances GROUP BY worker_id,adv_date) ad ON ad.worker_id=e.worker_id AND ad.adv_date=e.work_date
     LEFT JOIN (SELECT worker_id,pay_date,SUM(amount) odeme FROM payments GROUP BY worker_id,pay_date) pa ON pa.worker_id=e.worker_id AND pa.pay_date=e.work_date
-    {where}
     ORDER BY e.work_date DESC,e.id DESC LIMIT %s
     """, p)
 
