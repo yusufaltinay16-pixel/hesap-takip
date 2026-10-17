@@ -68,6 +68,17 @@ def display_date(value):
         return str(value or "")
 
 
+def normalize_date(value):
+    """Kullanıcıdan gelen tarihleri veritabanında daima YYYY-AA-GG saklar."""
+    raw = str(value or "").strip()[:10]
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return raw
+
+
 def money(v):
     try:
         return f"{float(v or 0):,.2f} ₺".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -154,6 +165,18 @@ def init_db():
                    AND wt.id=(SELECT MIN(x.id) FROM work_types x WHERE x.product_id=wt.product_id AND LOWER(x.name) LIKE '%katlama%')
                    AND NOT EXISTS(SELECT 1 FROM work_types y WHERE y.product_id=wt.product_id AND y.counts_product=1)""")
     c.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS package_size INTEGER NOT NULL DEFAULT 1")
+    # Eski kayıtlarda GG.AA.YYYY / GG/AA/YYYY olarak kalmış tarihler ay sonu
+    # filtresine girmiyordu. Hepsini tek seferde standart biçime dönüştür.
+    for table_name, column_name in (
+        ("entries", "work_date"),
+        ("deliveries", "deliv_date"),
+        ("expenses", "exp_date"),
+        ("payments", "pay_date"),
+        ("advances", "adv_date"),
+    ):
+        c.execute(f"""UPDATE {table_name}
+                      SET {column_name}=SUBSTRING({column_name},7,4)||'-'||SUBSTRING({column_name},4,2)||'-'||SUBSTRING({column_name},1,2)
+                      WHERE {column_name} ~ '^[0-9]{{2}}[./-][0-9]{{2}}[./-][0-9]{{4}}$'""")
     default_firm = c.execute("SELECT id FROM firms WHERE name='TEMA KONFEKSİYON'")
     default_firm_id = c.fetchone()["id"]
     for name in ["Şal", "Eşarp", "Tekstil Ürün"]:
@@ -519,7 +542,7 @@ def deliveries():
 @app.post("/add-delivery")
 def add_delivery(deliv_date: str = Form(...), product_id: int = Form(...), firm_qty: int = Form(...), note: str = Form("")):
     if int(firm_qty) > 0:
-        exec_db("INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at) VALUES(%s,NULL,%s,%s,0,%s,%s)", (deliv_date, product_id, firm_qty, note, now_iso()))
+        exec_db("INSERT INTO deliveries(deliv_date,worker_id,product_id,firm_qty,worker_qty,note,created_at) VALUES(%s,NULL,%s,%s,0,%s,%s)", (normalize_date(deliv_date), product_id, firm_qty, note, now_iso()))
     return RedirectResponse("/deliveries", status_code=303)
 
 
@@ -568,7 +591,7 @@ def worker_add(token: str, work_date: str = Form(...), work_type_id: int = Form(
     if not worker or not work_type or int(qty) <= 0:
         return RedirectResponse(f"/w/{token}?error=Kayıt yapılamadı", status_code=303)
     pack = max(1, int(package_size)) if work_type["pay_basis"] == "package" else 1
-    exec_db("INSERT INTO entries(work_date,worker_id,product_id,work_type_id,qty,package_size,firm_price,worker_price,note,created_at,source) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'telefon')", (work_date, worker["id"], work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, now_iso()))
+    exec_db("INSERT INTO entries(work_date,worker_id,product_id,work_type_id,qty,package_size,firm_price,worker_price,note,created_at,source) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'telefon')", (normalize_date(work_date), worker["id"], work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, now_iso()))
     return RedirectResponse(f"/w/{token}?saved=1", status_code=303)
 
 
@@ -590,7 +613,7 @@ def worker_edit(token: str, eid: int, work_date: str = Form(...), work_type_id: 
     work_type = one("""SELECT wt.*,p.firm_price FROM work_types wt JOIN products p ON p.id=wt.product_id WHERE wt.id=%s""", (work_type_id,))
     if worker and work_type and int(qty) > 0:
         pack = max(1, int(package_size)) if work_type["pay_basis"] == "package" else 1
-        exec_db("UPDATE entries SET work_date=%s, product_id=%s, work_type_id=%s, qty=%s, package_size=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s AND worker_id=%s", (work_date, work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, eid, worker["id"]))
+        exec_db("UPDATE entries SET work_date=%s, product_id=%s, work_type_id=%s, qty=%s, package_size=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s AND worker_id=%s", (normalize_date(work_date), work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, eid, worker["id"]))
     return RedirectResponse(f"/w/{token}", status_code=303)
 
 
@@ -620,7 +643,7 @@ def edit_entry(eid: int, work_date: str = Form(...), worker_id: int = Form(...),
     work_type = one("""SELECT wt.*,p.firm_price FROM work_types wt JOIN products p ON p.id=wt.product_id WHERE wt.id=%s""", (work_type_id,))
     if work_type and int(qty) > 0:
         pack = max(1, int(package_size)) if work_type["pay_basis"] == "package" else 1
-        exec_db("UPDATE entries SET work_date=%s, worker_id=%s, product_id=%s, work_type_id=%s, qty=%s, package_size=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s", (work_date, worker_id, work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, eid))
+        exec_db("UPDATE entries SET work_date=%s, worker_id=%s, product_id=%s, work_type_id=%s, qty=%s, package_size=%s, firm_price=%s, worker_price=%s, note=%s WHERE id=%s", (normalize_date(work_date), worker_id, work_type["product_id"], work_type_id, qty, pack, work_type["firm_price"], work_type["worker_price"], note, eid))
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -641,7 +664,7 @@ def expenses():
 
 @app.post("/add-expense")
 def add_expense(exp_date: str = Form(...), category: str = Form(...), amount: float = Form(...), note: str = Form("")):
-    exec_db("INSERT INTO expenses(exp_date,category,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (exp_date, category, amount, note, now_iso())); return RedirectResponse("/expenses", status_code=303)
+    exec_db("INSERT INTO expenses(exp_date,category,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (normalize_date(exp_date), category, amount, note, now_iso())); return RedirectResponse("/expenses", status_code=303)
 
 
 @app.post("/delete-expense/{eid}")
@@ -664,7 +687,7 @@ def payments():
 
 @app.post("/add-payment")
 def add_payment(pay_date: str = Form(...), worker_id: int = Form(...), amount: float = Form(...), note: str = Form("")):
-    exec_db("INSERT INTO payments(pay_date,worker_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (pay_date, worker_id, amount, note, now_iso())); return RedirectResponse("/payments", status_code=303)
+    exec_db("INSERT INTO payments(pay_date,worker_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (normalize_date(pay_date), worker_id, amount, note, now_iso())); return RedirectResponse("/payments", status_code=303)
 
 
 @app.post("/delete-payment/{pid}")
@@ -674,7 +697,7 @@ def delete_payment(pid: int): exec_db("DELETE FROM payments WHERE id=%s", (pid,)
 
 @app.post("/add-advance")
 def add_advance(adv_date: str = Form(...), worker_id: int = Form(...), amount: float = Form(...), note: str = Form("")):
-    exec_db("INSERT INTO advances(adv_date,worker_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (adv_date, worker_id, amount, note, now_iso())); return RedirectResponse("/payments", status_code=303)
+    exec_db("INSERT INTO advances(adv_date,worker_id,amount,note,created_at) VALUES(%s,%s,%s,%s,%s)", (normalize_date(adv_date), worker_id, amount, note, now_iso())); return RedirectResponse("/payments", status_code=303)
 
 
 @app.post("/delete-advance/{aid}")
