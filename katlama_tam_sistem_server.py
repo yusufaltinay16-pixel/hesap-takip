@@ -558,9 +558,13 @@ def get_worker_by_token(token: str):
     return one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
 
 @app.get("/w/{token}", response_class=HTMLResponse)
-def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None):
+def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None, m: Optional[str] = None):
     worker = get_worker_by_token(token)
     if not worker: return page("Link Geçersiz", "<div class='bad'>Bu çalışan linki geçersiz veya pasif.</div>", nav=False)
+    try:
+        report_month = datetime.strptime(m or this_month(), "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        report_month = this_month()
     work_types = rows("""SELECT wt.id,wt.name,wt.worker_price,wt.pay_basis,p.name product_name,f.name firm_name
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
                         WHERE wt.active=1 AND p.active=1 ORDER BY f.name,p.name,wt.name""")
@@ -570,7 +574,27 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     adv_total = num(one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE worker_id=%s", (worker["id"],))["total"])
     today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
     msg = "<div class='notice'>Adet kaydedildi.</div>" if saved else (f"<div class='bad'>{error}</div>" if error else "")
-    last_rows = rows("""SELECT e.id,e.work_date,COALESCE(wt.name,p.name) product,e.qty,e.package_size,e.qty*e.package_size piece_qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note FROM entries e JOIN products p ON p.id=e.product_id LEFT JOIN work_types wt ON wt.id=e.work_type_id WHERE e.worker_id=%s ORDER BY e.work_date DESC,e.id DESC LIMIT 30""", (worker["id"],))
+    last_rows = rows("""SELECT e.id,e.work_date,f.name firm_name,p.name product_name,COALESCE(wt.name,p.name) product,e.qty,e.package_size,e.qty*e.package_size piece_qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note FROM entries e JOIN products p ON p.id=e.product_id JOIN firms f ON f.id=p.firm_id LEFT JOIN work_types wt ON wt.id=e.work_type_id WHERE e.worker_id=%s AND e.work_date LIKE %s ORDER BY e.work_date DESC,e.id DESC""", (worker["id"], report_month+"%"))
+    monthly_groups, daily_groups = {}, {}
+    for r in last_rows:
+        key = (r["firm_name"], r["product_name"], r["product"], int(num(r["package_size"])))
+        for groups, group_key in ((monthly_groups, key), (daily_groups, (str(r["work_date"]),) + key)):
+            if group_key not in groups:
+                groups[group_key] = dict(r, qty=0, earned=0)
+            groups[group_key]["qty"] += num(r["qty"])
+            groups[group_key]["earned"] += num(r["earned"])
+    monthly_cards, daily_cards = "", ""
+    for groups, is_daily in ((monthly_groups, False), (daily_groups, True)):
+        for r in groups.values():
+            package = int(num(r["package_size"]))
+            unit = f"paket ({package}'li)" if package > 1 else "adet"
+            context = escape(r["firm_name"]) + " — " + escape(r["product_name"])
+            if is_daily:
+                daily_cards += f"<div class='record-card'><div class='record-head'><b>{escape(r['product'])}</b><span>{display_date(r['work_date'])}</span></div><div class='small'>{context}</div><div class='record-values'><div class='record-value'><span>Toplam Adet</span><b>{int(r['qty'])} {unit}</b></div><div class='record-value'><span>Hakediş</span><b>{money(r['earned'])}</b></div></div></div>"
+            else:
+                monthly_cards += f"<div class='kpi'><span>{escape(r['product'])}</span><b>{int(r['qty'])} {unit}</b><div class='small'>{context}</div></div>"
+    monthly_cards = monthly_cards or "<p class='small'>Bu ay kayıt yok.</p>"
+    daily_cards = daily_cards or "<p class='small'>Bu ay kayıt yok.</p>"
     record_cards = ""
     for r in last_rows:
         is_package = int(num(r['package_size'])) > 1
@@ -580,7 +604,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     if not record_cards:
         record_cards = "<div class='center small'>Henüz kayıt yok.</div>"
     kalan = num(total["earned"] if total else 0) - paid_total - adv_total
-    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Çalışan</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü İş Adedim</span><b>{int(num(today_total['qty']))}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="3">3'lü</option><option value="6">6'lı</option><option value="7">7'li</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Son Kayıtlarım</h2><div class='record-list'>{record_cards}</div></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
+    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - Çalışan</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card"><h2>Aylık İş Adetlerim</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class="kpis">{monthly_cards}</div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="3">3'lü</option><option value="6">6'lı</option><option value="7">7'li</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Günlük İş Adetlerim</h2><div class="record-list">{daily_cards}</div></div><div class="card"><details><summary>Kayıtlarımı Güncelle / Sil</summary><div class='record-list'>{record_cards}</div></details></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
     return page("Çalışan", body, nav=False)
 
 
