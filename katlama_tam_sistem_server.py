@@ -557,8 +557,19 @@ def get_worker_by_token(token: str):
     # Her link token üzerinden ilgili kişiyi açar.
     return one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
 
+def worker_balance(worker_id: int):
+    """Hakediş, ödeme ve avansı tek veritabanı görünümünden, birer kez toplar."""
+    return one("""
+        SELECT
+          (SELECT COALESCE(SUM(qty*worker_price),0) FROM entries WHERE worker_id=%s) earned,
+          (SELECT COALESCE(SUM(qty*worker_price),0) FROM entries WHERE worker_id=%s AND work_date=%s) today_earned,
+          (SELECT COALESCE(SUM(amount),0) FROM payments WHERE worker_id=%s) paid,
+          (SELECT COALESCE(SUM(amount),0) FROM advances WHERE worker_id=%s) advance
+    """, (worker_id, worker_id, today(), worker_id, worker_id))
+
+
 @app.get("/w/{token}", response_class=HTMLResponse)
-def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None, m: Optional[str] = None):
+def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None, m: Optional[str] = None, deleted: Optional[str] = None):
     worker = get_worker_by_token(token)
     if not worker: return page("Link Geçersiz", "<div class='bad'>Bu çalışan linki geçersiz veya pasif.</div>", nav=False)
     try:
@@ -569,11 +580,12 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
                         WHERE wt.active=1 AND p.active=1 ORDER BY f.name,p.name,wt.name""")
     product_opts = "".join([f"<option value='{w['id']}' data-basis='{w['pay_basis']}'>{w['firm_name']} — {w['product_name']} — {w['name']} ({money(w['worker_price'])} / {'paket' if w['pay_basis']=='package' else 'adet'})</option>" for w in work_types])
-    total = one("SELECT COALESCE(SUM(qty),0) qty, COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s", (worker["id"],))
-    paid_total = num(one("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE worker_id=%s", (worker["id"],))["total"])
-    adv_total = num(one("SELECT COALESCE(SUM(amount),0) total FROM advances WHERE worker_id=%s", (worker["id"],))["total"])
-    today_total = one("SELECT COALESCE(SUM(qty),0) qty FROM entries WHERE worker_id=%s AND work_date=%s", (worker["id"], today()))
+    total = worker_balance(worker["id"])
+    paid_total = num(total["paid"])
+    adv_total = num(total["advance"])
     msg = "<div class='notice'>Adet kaydedildi.</div>" if saved else (f"<div class='bad'>{error}</div>" if error else "")
+    if deleted:
+        msg = "<div class='notice'>Adet kaydı silindi. Kazanç ve kalan tutarlar yeniden hesaplandı.</div>"
     last_rows = rows("""SELECT e.id,e.work_date,f.name firm_name,p.name product_name,COALESCE(wt.name,p.name) product,e.qty,e.package_size,e.qty*e.package_size piece_qty,e.qty*e.worker_price earned,COALESCE(e.note,'') note FROM entries e JOIN products p ON p.id=e.product_id JOIN firms f ON f.id=p.firm_id LEFT JOIN work_types wt ON wt.id=e.work_type_id WHERE e.worker_id=%s AND e.work_date LIKE %s ORDER BY e.work_date DESC,e.id DESC""", (worker["id"], report_month+"%"))
     monthly_groups, daily_groups = {}, {}
     for r in last_rows:
@@ -604,7 +616,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
     if not record_cards:
         record_cards = "<div class='center small'>Henüz kayıt yok.</div>"
     kalan = num(total["earned"] if total else 0) - paid_total - adv_total
-    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{escape(worker['name'])}</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card"><h2>Aylık İş Adetlerim</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class="kpis">{monthly_cards}</div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="3">3'lü</option><option value="6">6'lı</option><option value="7">7'li</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Günlük İş Adetlerim</h2><div class="record-list">{daily_cards}</div></div><div class="card"><details><summary>Kayıtlarımı Güncelle / Sil</summary><div class='record-list'>{record_cards}</div></details></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
+    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{escape(worker['name'])}</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis"><div class="kpi"><span>Bugünkü Kazancım</span><b>{money(total["today_earned"])}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Toplam Ödeme</span><b>{money(paid_total)}</b></div><div class="kpi"><span>Toplam Avans</span><b>{money(adv_total)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card"><h2>Aylık İş Adetlerim</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class="kpis">{monthly_cards}</div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="3">3'lü</option><option value="6">6'lı</option><option value="7">7'li</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Günlük İş Adetlerim</h2><div class="record-list">{daily_cards}</div></div><div class="card"><details><summary>Kayıtlarımı Güncelle / Sil</summary><div class='record-list'>{record_cards}</div></details></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
     return page(worker["name"], body, nav=False)
 
 
@@ -646,8 +658,12 @@ def worker_edit(token: str, eid: int, work_date: str = Form(...), work_type_id: 
 @app.get("/w/{token}/delete/{eid}")
 def worker_delete(token: str, eid: int):
     worker = get_worker_by_token(token)
-    if worker: exec_db("DELETE FROM entries WHERE id=%s AND worker_id=%s", (eid, worker["id"]))
-    return RedirectResponse(f"/w/{token}", status_code=303)
+    if not worker:
+        return RedirectResponse(f"/w/{token}", status_code=303)
+    deleted_id = exec_db("DELETE FROM entries WHERE id=%s AND worker_id=%s RETURNING id", (eid, worker["id"]))
+    if deleted_id is None:
+        return RedirectResponse(f"/w/{token}?error=" + quote("Kayıt bulunamadı veya daha önce silindi."), status_code=303)
+    return RedirectResponse(f"/w/{token}?deleted={deleted_id}&v={secrets.token_hex(4)}", status_code=303)
 
 
 @app.get("/edit-entry/{eid}", response_class=HTMLResponse)
