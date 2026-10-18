@@ -87,6 +87,11 @@ def money(v):
         return "0,00 ₺"
 
 
+def csv_money(value):
+    """Türkçe Excel için para tutarlarını ondalık virgülle dışa aktarır."""
+    return f"{num(value):.2f}".replace(".", ",")
+
+
 def num(v):
     try:
         return float(v or 0)
@@ -836,22 +841,22 @@ def export_month(m: Optional[str] = None):
     firm_daily_data = firm_month_detail(m)
     with out.open("w", newline="", encoding="utf-8-sig") as f:
         wr = csv.writer(f, delimiter=";")
-        wr.writerow(["Ay", m]); wr.writerow(["Firma Teslim Adet", int(num(sm["qty"]))]); wr.writerow(["Firma Hak Ediş", f"{sm['revenue']:.2f}"]); wr.writerow(["İşçilik Net Kalan", f"{sm['labor']:.2f}"]); wr.writerow(["Masraflar", f"{sm['expense']:.2f}"]); wr.writerow(["Net Kazanç", f"{sm['net']:.2f}"]); wr.writerow([])
+        wr.writerow(["Ay", m]); wr.writerow(["Firma Teslim Adet", int(num(sm["qty"]))]); wr.writerow(["Firma Hak Ediş", csv_money(sm['revenue'])]); wr.writerow(["İşçilik Net Kalan", csv_money(sm['labor'])]); wr.writerow(["Masraflar", csv_money(sm['expense'])]); wr.writerow(["Net Kazanç", csv_money(sm['net'])]); wr.writerow([])
         wr.writerow(["FİRMA BAZLI AYLIK KÂR ÖZETİ"])
         wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","ÇALIŞAN ÜCRETİ","SİZE KALAN BRÜT KÂR"])
-        for r in firm_data: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),f"{num(r['revenue']):.2f}",f"{num(r['labor']):.2f}",f"{num(r['profit']):.2f}"])
+        for r in firm_data: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),csv_money(num(r['revenue'])),csv_money(num(r['labor'])),csv_money(num(r['profit']))])
         wr.writerow([])
         wr.writerow(["ÇALIŞAN BAZLI AYLIK HESAP ÖZETİ"])
         wr.writerow(["ÇALIŞAN","TOPLAM HAKEDİŞ","AVANS","ÖDEME","KALAN BAKİYE"])
-        for r in worker_summary_data: wr.writerow([r['worker'],f"{num(r['earned']):.2f}",f"{num(r['advance']):.2f}",f"{num(r['paid']):.2f}",f"{num(r['balance']):.2f}"])
+        for r in worker_summary_data: wr.writerow([r['worker'],csv_money(num(r['earned'])),csv_money(num(r['advance'])),csv_money(num(r['paid'])),csv_money(num(r['balance']))])
         wr.writerow([])
         wr.writerow(["ÇALIŞAN BAZLI GÜN GÜN AYLIK DÖKÜM"])
         wr.writerow(["TARİH","ÇALIŞAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET / PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM ÜCRET","HAKEDİŞ"])
-        for r in worker_data: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),f"{num(r['worker_price']):.2f}",f"{num(r['earned']):.2f}"])
+        for r in worker_data: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),csv_money(num(r['worker_price'])),csv_money(num(r['earned']))])
         wr.writerow([])
         wr.writerow(["FİRMA BAZLI GÜN GÜN AYLIK DÖKÜM"])
         wr.writerow(["TARİH","FİRMA","ÜRÜN","TESLİM ADET","BİRİM FİYAT","FİRMA HAKEDİŞİ"])
-        for r in firm_daily_data: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),f"{num(r['firm_price']):.2f}",f"{num(r['amount']):.2f}"])
+        for r in firm_daily_data: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),csv_money(num(r['firm_price'])),csv_money(num(r['amount']))])
     return FileResponse(out, filename=out.name)
 
 
@@ -906,11 +911,11 @@ def export_workers(m: Optional[str] = None, worker_id: Optional[int] = None):
         wr = csv.writer(f, delimiter=";")
         wr.writerow(["ÇALIŞAN AYLIK HESAP TOPLAMLARI",m])
         wr.writerow(["ÇALIŞAN","HAKEDİŞ","AVANS","ÖDEME","KALAN"])
-        for r in summary: wr.writerow([r['worker'],f"{num(r['earned']):.2f}",f"{num(r['advance']):.2f}",f"{num(r['paid']):.2f}",f"{num(r['balance']):.2f}"])
-        wr.writerow(["GENEL TOPLAM",f"{sum(num(r['earned']) for r in summary):.2f}",f"{sum(num(r['advance']) for r in summary):.2f}",f"{sum(num(r['paid']) for r in summary):.2f}",f"{sum(num(r['balance']) for r in summary):.2f}"])
+        for r in summary: wr.writerow([r['worker'],csv_money(num(r['earned'])),csv_money(num(r['advance'])),csv_money(num(r['paid'])),csv_money(num(r['balance']))])
+        wr.writerow(["GENEL TOPLAM",csv_money(sum(num(r['earned']) for r in summary)),csv_money(sum(num(r['advance']) for r in summary)),csv_money(sum(num(r['paid']) for r in summary)),csv_money(sum(num(r['balance']) for r in summary))])
         wr.writerow([]); wr.writerow(["GÜN GÜN YAPILAN İŞLER"])
         wr.writerow(["TARİH","ÇALIŞAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET/PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM TL","TOPLAM TL"])
-        for r in detail: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),f"{num(r['worker_price']):.2f}",f"{num(r['earned']):.2f}"])
+        for r in detail: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),csv_money(num(r['worker_price'])),csv_money(num(r['earned']))])
     return FileResponse(out,filename=out.name)
 
 
@@ -928,11 +933,11 @@ def export_firms(m: Optional[str] = None, firm_id: Optional[int] = None):
         wr.writerow([])
         wr.writerow(["FİRMA AYLIK HESAP TOPLAMLARI",m])
         wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","ÇALIŞAN ÜCRETİ","BRÜT KÂR"])
-        for r in summary: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),f"{num(r['revenue']):.2f}",f"{num(r['labor']):.2f}",f"{num(r['profit']):.2f}"])
-        wr.writerow(["GENEL TOPLAM",int(sum(num(r['delivered_qty']) for r in summary)),f"{sum(num(r['revenue']) for r in summary):.2f}",f"{sum(num(r['labor']) for r in summary):.2f}",f"{sum(num(r['profit']) for r in summary):.2f}"])
+        for r in summary: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),csv_money(num(r['revenue'])),csv_money(num(r['labor'])),csv_money(num(r['profit']))])
+        wr.writerow(["GENEL TOPLAM",int(sum(num(r['delivered_qty']) for r in summary)),csv_money(sum(num(r['revenue']) for r in summary)),csv_money(sum(num(r['labor']) for r in summary)),csv_money(sum(num(r['profit']) for r in summary))])
         wr.writerow([]); wr.writerow(["GÜN GÜN FİRMAYA TESLİM EDİLEN İŞLER"])
         wr.writerow(["TARİH","FİRMA","ÜRÜN","ADET","BİRİM TL","TOPLAM TL"])
-        for r in detail: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),f"{num(r['firm_price']):.2f}",f"{num(r['amount']):.2f}"])
+        for r in detail: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),csv_money(num(r['firm_price'])),csv_money(num(r['amount']))])
     return FileResponse(out,filename=out.name)
 
 
