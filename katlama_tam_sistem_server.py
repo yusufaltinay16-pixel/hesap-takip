@@ -1,4 +1,5 @@
 import os
+import math
 import csv
 import socket
 import secrets
@@ -136,6 +137,11 @@ def init_db():
     con = db(); c = con.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS workers(id SERIAL PRIMARY KEY,name TEXT NOT NULL UNIQUE,phone TEXT,token TEXT UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS firms(id SERIAL PRIMARY KEY,name TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS firm_receipts(
+        id SERIAL PRIMARY KEY,firm_id INTEGER NOT NULL REFERENCES firms(id),
+        receipt_date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('payment','advance')),
+        amount NUMERIC(18,2) NOT NULL CHECK(amount>0),note TEXT,created_at TEXT NOT NULL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS firm_receipts_firm_date_idx ON firm_receipts(firm_id,receipt_date)")
     c.execute("""UPDATE firms SET name='TEMA KONFEKSİYON' WHERE name='Genel Firma'
                  AND NOT EXISTS(SELECT 1 FROM firms WHERE name='TEMA KONFEKSİYON')""")
     c.execute("""INSERT INTO firms(name,active,created_at) VALUES('TEMA KONFEKSİYON',1,%s) ON CONFLICT(name) DO UPDATE SET active=1""", (now_iso(),))
@@ -210,7 +216,7 @@ CSS = """
 def page(title, body, nav=True):
     nav_html = ""
     if nav:
-        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a></div>"""
+        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/firm-receipts">Firma Tahsilat / Avans</a><a href="/month">Ay Sonu</a></div>"""
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{title}</h1>{nav_html}</div>{body}</div></body></html>"""
 
 
@@ -751,6 +757,95 @@ def add_advance(adv_date: str = Form(...), worker_id: int = Form(...), amount: f
 def delete_advance(aid: int): exec_db("DELETE FROM advances WHERE id=%s", (aid,)); return RedirectResponse("/payments", status_code=303)
 
 
+def firm_account_summary(m: Optional[str] = None, firm_id: Optional[int] = None):
+    start = m + '-01' if m else '0000-01-01'
+    if m:
+        d = datetime.strptime(m, '%Y-%m')
+        end = date(d.year + (d.month == 12), 1 if d.month == 12 else d.month + 1, 1).isoformat()
+    else:
+        end = '9999-12-31'
+    return rows("""
+        SELECT f.id,f.name firm_name,
+          COALESCE(d.earned,0) earned,COALESCE(r.collected,0) collected,
+          COALESCE(r.advance,0) advance,
+          COALESCE(d.opening,0)-COALESCE(r.opening,0) opening,
+          COALESCE(d.opening,0)-COALESCE(r.opening,0)+COALESCE(d.earned,0)
+            -COALESCE(r.collected,0)-COALESCE(r.advance,0) balance
+        FROM firms f
+        LEFT JOIN (
+          SELECT p.firm_id,
+            SUM(CASE WHEN d.deliv_date>=%s THEN d.firm_qty*p.firm_price ELSE 0 END) earned,
+            SUM(CASE WHEN d.deliv_date<%s THEN d.firm_qty*p.firm_price ELSE 0 END) opening
+          FROM deliveries d JOIN products p ON p.id=d.product_id
+          WHERE d.deliv_date<%s GROUP BY p.firm_id
+        ) d ON d.firm_id=f.id
+        LEFT JOIN (
+          SELECT firm_id,
+            SUM(CASE WHEN receipt_date>=%s AND kind='payment' THEN amount ELSE 0 END) collected,
+            SUM(CASE WHEN receipt_date>=%s AND kind='advance' THEN amount ELSE 0 END) advance,
+            SUM(CASE WHEN receipt_date<%s THEN amount ELSE 0 END) opening
+          FROM firm_receipts WHERE receipt_date<%s GROUP BY firm_id
+        ) r ON r.firm_id=f.id
+        WHERE (%s IS NULL OR f.id=%s)
+        ORDER BY f.name,f.id
+    """, (start,start,end,start,start,start,end,firm_id,firm_id))
+
+
+def firm_receipt_detail(m: Optional[str] = None, firm_id: Optional[int] = None):
+    return rows("""SELECT r.*,f.name firm_name FROM firm_receipts r
+        JOIN firms f ON f.id=r.firm_id
+        WHERE (%s IS NULL OR r.firm_id=%s) AND (%s IS NULL OR r.receipt_date LIKE %s)
+        ORDER BY r.receipt_date DESC,r.id DESC""",
+        (firm_id,firm_id,m,(m+'%') if m else None))
+
+
+def firm_account_table(accounts):
+    trs = ''.join(f"<tr><td>{escape(r['firm_name'])}</td><td class='right'>{money(r['opening'])}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['collected'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in accounts)
+    totals = ''.join(f"<th class='right'>{money(sum(num(r[k]) for r in accounts))}</th>" for k in ('opening','earned','collected','advance','balance'))
+    return f"<div class='card'><h2>Firma Alacak Hesabı</h2><p class='small'>Kalan alacak = Önceki dönemden devir + Hakediş − Tahsilat − Alınan avans. Eksi bakiye, hakedişi aşan ödeme alındığını gösterir.</p><div class='table-wrap'><table><tr><th>FİRMA</th><th>DEVİR</th><th>HAKEDİŞ</th><th>TAHSİLAT</th><th>ALINAN AVANS</th><th>KALAN ALACAK</th></tr>{trs}<tr><th>TOPLAM</th>{totals}</tr></table></div></div>"
+
+
+def firm_receipt_table(receipts, allow_delete=False):
+    trs = ''
+    for r in receipts:
+        kind = 'Alınan Avans' if r['kind']=='advance' else 'Tahsilat'
+        action = f"<td><form method='post' action='/firm-receipts/{r['id']}/delete'><button class='btn red'>Sil</button></form></td>" if allow_delete else ''
+        trs += f"<tr><td>{display_date(r['receipt_date'])}</td><td>{escape(r['firm_name'])}</td><td>{kind}</td><td class='right'>{money(r['amount'])}</td><td>{escape(r['note'] or '')}</td>{action}</tr>"
+    return f"<div class='card'><h2>Firmadan Alınan Ödemeler ve Avanslar</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>İŞLEM</th><th>TUTAR</th><th>AÇIKLAMA</th>{'<th>İŞLEM</th>' if allow_delete else ''}</tr>{trs}</table></div></div>"
+
+
+@app.get('/firm-receipts', response_class=HTMLResponse)
+def firm_receipts_page(saved: Optional[str] = None, error: Optional[str] = None):
+    opts = ''.join(f"<option value='{r['id']}'>{escape(r['name'])}</option>" for r in rows('SELECT id,name FROM firms WHERE active=1 ORDER BY name,id'))
+    msg = f"<div class='bad'>{escape(error)}</div>" if error else ("<div class='notice'>İşlem tamamlandı. Firma bakiyesi güncellendi.</div>" if saved else '')
+    body = f"""{msg}<div class='card'><h2>Firma Tahsilatı / Alınan Avans</h2><form method='post' action='/firm-receipts/add'><div class='grid'><div><label>Firma</label><select name='firm_id' required>{opts}</select></div><div><label>Tarih</label><input type='date' name='receipt_date' value='{today()}' required></div><div><label>İşlem Türü</label><select name='kind'><option value='payment'>Tahsilat</option><option value='advance'>Alınan Avans</option></select></div><div><label>Tutar (TL)</label><input type='number' name='amount' step='0.01' min='0.01' required></div><div><label>Açıklama</label><input name='note'></div></div><p>Alınan parayı yalnızca bir kez kaydet. Önceden kaydedilen avansı tekrar tahsilat olarak girme.</p><button class='btn green'>Kaydet</button></form></div>"""
+    body += firm_account_table(firm_account_summary())
+    body += firm_receipt_table(firm_receipt_detail(), allow_delete=True)
+    return page('Firma Tahsilat ve Avansları', body)
+
+
+@app.post('/firm-receipts/add')
+def add_firm_receipt(firm_id: int = Form(...), receipt_date: str = Form(...), kind: str = Form(...), amount: float = Form(...), note: str = Form('')):
+    receipt_date = normalize_date(receipt_date)
+    try:
+        datetime.strptime(receipt_date, '%Y-%m-%d')
+        valid = math.isfinite(amount) and amount>0 and kind in ('payment','advance')
+    except ValueError:
+        valid = False
+    if not valid or not one('SELECT id FROM firms WHERE id=%s AND active=1', (firm_id,)):
+        return RedirectResponse('/firm-receipts?error='+quote('Firma, tarih, işlem türü ve pozitif tutarı kontrol edin.'), status_code=303)
+    exec_db('INSERT INTO firm_receipts(firm_id,receipt_date,kind,amount,note,created_at) VALUES(%s,%s,%s,%s,%s,%s)', (firm_id,receipt_date,kind,amount,note,now_iso()))
+    return RedirectResponse('/firm-receipts?saved=1', status_code=303)
+
+
+@app.post('/firm-receipts/{rid}/delete')
+def delete_firm_receipt(rid: int):
+    exec_db('DELETE FROM firm_receipts WHERE id=%s', (rid,))
+    return RedirectResponse('/firm-receipts?saved=1', status_code=303)
+
+
+
+
 def firm_month_summary(m: str, firm_id: Optional[int] = None):
     return rows("""
         SELECT f.name firm_name,
@@ -899,6 +994,8 @@ def firm_month_report(m: Optional[str] = None, firm_id: Optional[int] = None):
     summary_trs = "".join([f"<tr><td>{r['firm_name']}</td><td class='right'>{int(num(r['delivered_qty']))}</td><td class='right'>{money(r['revenue'])}</td><td class='right'>{money(r['labor'])}</td><td class='right'>{money(r['profit'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay firma hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in detail]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
     body = f"""<div class='card'><h2>{escape(firm_title)}</h2><p>Firma Aylık Raporu — {escape(m)}</p></div><div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-firm'>Firma seç</label><select id='report-firm' name='firm_id' style='max-width:280px;display:inline-block'>{firm_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}&amp;firm_id={firm_id or 0}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body += firm_account_table(firm_account_summary(m, firm_id))
+    body += firm_receipt_table(firm_receipt_detail(m, firm_id))
     return page("Firma Aylık Raporu", body)
 
 
@@ -938,6 +1035,17 @@ def export_firms(m: Optional[str] = None, firm_id: Optional[int] = None):
         wr.writerow([]); wr.writerow(["GÜN GÜN FİRMAYA TESLİM EDİLEN İŞLER"])
         wr.writerow(["TARİH","FİRMA","ÜRÜN","ADET","BİRİM TL","TOPLAM TL"])
         for r in detail: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),csv_money(num(r['firm_price'])),csv_money(num(r['amount']))])
+        wr.writerow([])
+        wr.writerow(['FİRMA ALACAK HESABI'])
+        wr.writerow(['FİRMA','ÖNCEKİ DÖNEMDEN DEVİR','HAKEDİŞ','TAHSİLAT','ALINAN AVANS','KALAN ALACAK'])
+        accounts = firm_account_summary(m, firm_id)
+        for r in accounts:
+            wr.writerow([r['firm_name']] + [csv_money(r[k]) for k in ('opening','earned','collected','advance','balance')])
+        wr.writerow(['TOPLAM'] + [csv_money(sum(num(r[k]) for r in accounts)) for k in ('opening','earned','collected','advance','balance')])
+        wr.writerow([])
+        wr.writerow(['TARİH','FİRMA','İŞLEM','TUTAR','AÇIKLAMA'])
+        for r in firm_receipt_detail(m, firm_id):
+            wr.writerow([display_date(r['receipt_date']),r['firm_name'],'Alınan Avans' if r['kind']=='advance' else 'Tahsilat',csv_money(r['amount']),r['note'] or ''])
     return FileResponse(out,filename=out.name)
 
 
@@ -945,3 +1053,4 @@ if __name__ == "__main__":
     init_db()
     print("="*70); print("KATLAMA ATÖLYESİ PROFESYONEL SİSTEM BAŞLADI"); print(f"Yönetim paneli: http://127.0.0.1:{PORT}/dashboard"); print(f"Aynı Wi-Fi telefon: http://{local_ip()}:{PORT}"); print("="*70)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
