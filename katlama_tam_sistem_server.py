@@ -878,6 +878,8 @@ def worker_month_report(m: Optional[str] = None, worker_id: Optional[int] = None
 @app.get("/month/firms", response_class=HTMLResponse)
 def firm_month_report(m: Optional[str] = None, firm_id: Optional[int] = None):
     firm_id = firm_id or None
+    selected_firm = one("SELECT name FROM firms WHERE id=%s", (firm_id,)) if firm_id else None
+    firm_title = selected_firm["name"] if selected_firm else ("Firma bulunamadı" if firm_id else "Tüm Firmalar")
     m = m or this_month()
     summary = firm_month_summary(m, firm_id)
     detail = firm_month_detail(m, firm_id)
@@ -891,7 +893,7 @@ def firm_month_report(m: Optional[str] = None, firm_id: Optional[int] = None):
     total_profit = sum(num(r["profit"]) for r in summary)
     summary_trs = "".join([f"<tr><td>{r['firm_name']}</td><td class='right'>{int(num(r['delivered_qty']))}</td><td class='right'>{money(r['revenue'])}</td><td class='right'>{money(r['labor'])}</td><td class='right'>{money(r['profit'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay firma hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in detail]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
-    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-firm'>Firma seç</label><select id='report-firm' name='firm_id' style='max-width:280px;display:inline-block'>{firm_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}&amp;firm_id={firm_id or 0}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body = f"""<div class='card'><h2>{escape(firm_title)}</h2><p>Firma Aylık Raporu — {escape(m)}</p></div><div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-firm'>Firma seç</label><select id='report-firm' name='firm_id' style='max-width:280px;display:inline-block'>{firm_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}&amp;firm_id={firm_id or 0}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
     return page("Firma Aylık Raporu", body)
 
 
@@ -915,10 +917,15 @@ def export_workers(m: Optional[str] = None, worker_id: Optional[int] = None):
 @app.get("/export-firms")
 def export_firms(m: Optional[str] = None, firm_id: Optional[int] = None):
     firm_id = firm_id or None
+    selected_firm = one("SELECT name FROM firms WHERE id=%s", (firm_id,)) if firm_id else None
+    firm_title = selected_firm["name"] if selected_firm else ("Firma bulunamadı" if firm_id else "Tüm Firmalar")
     m = m or this_month(); out = Path(f"firma_aylik_rapor_{m}_{firm_id or 'tumu'}.csv")
     summary = firm_month_summary(m, firm_id); detail = firm_month_detail(m, firm_id)
     with out.open("w", newline="", encoding="utf-8-sig") as f:
         wr = csv.writer(f, delimiter=";")
+        wr.writerow(["FİRMA", firm_title])
+        wr.writerow(["AY", m])
+        wr.writerow([])
         wr.writerow(["FİRMA AYLIK HESAP TOPLAMLARI",m])
         wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","ÇALIŞAN ÜCRETİ","BRÜT KÂR"])
         for r in summary: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),f"{num(r['revenue']):.2f}",f"{num(r['labor']):.2f}",f"{num(r['profit']):.2f}"])
