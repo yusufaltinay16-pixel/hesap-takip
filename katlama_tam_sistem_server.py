@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional
 from urllib.parse import quote
+from html import escape
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -28,7 +29,7 @@ async def disable_page_cache(request: Request, call_next):
     response.headers["Expires"] = "0"
     return response
 
-# Eleman link sistemi:
+# Çalışan link sistemi:
 # Her çalışan kendi tokenı ile kişiye özel link alır.
 # Link formatı: https://katlama-sistem.onrender.com/w/<token>
 LEGACY_WORKER_TOKENS = {}
@@ -37,7 +38,7 @@ DEFAULT_PUBLIC_BASE_URL = "https://katlama-sistem.onrender.com"
 
 
 def public_base_url():
-    """Eleman linklerinde Render'in ozel 10.x adresinin kullanilmasini engeller."""
+    """Çalışan linklerinde Render'in ozel 10.x adresinin kullanilmasini engeller."""
     value = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
     invalid_values = ("http://10.", "https://10.", "http://127.", "https://127.",
                       "http://localhost", "https://localhost")
@@ -185,7 +186,7 @@ def init_db():
     for r in c.fetchall():
         c.execute("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(14), r["id"]))
 
-    # Mevcut tokenlar korunur; tokenı boş olan eski elemanlara yukarıda otomatik kişiye özel link tokenı verilir.
+    # Mevcut tokenlar korunur; tokenı boş olan eski çalışanlara yukarıda otomatik kişiye özel link tokenı verilir.
 
     con.commit(); c.close(); con.close()
 
@@ -204,7 +205,7 @@ CSS = """
 def page(title, body, nav=True):
     nav_html = ""
     if nav:
-        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Eleman Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a></div>"""
+        nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/month">Ay Sonu</a></div>"""
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{title}</h1>{nav_html}</div>{body}</div></body></html>"""
 
 
@@ -344,7 +345,7 @@ def dashboard():
     <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
     <div class="card"><h2>Firma Teslimi ve Ana Ürün Adedi</h2><p class='small'>Her ürün için seçtiğiniz “Ana Adet” işi gerçek ürün adedi kabul edilir.</p><table><tr><th>Firma</th><th>Ürün</th><th class='right'>Firma Teslim Adet</th><th class='right'>Ana İş Adedi</th><th class='right'>Fark</th></tr>{comp}</table></div>
     <div class="card"><h2>İşçilik Adet Kontrolü</h2><p class='small'>Her işin adedi, o firma ve ürün için seçtiğiniz ana işin adediyle karşılaştırılır. Fark sıfırsa doğru, artıysa fazla, eksiyse eksik girilmiştir.</p><table><tr><th>Firma</th><th>Ürün</th><th>Yapılan İş</th><th class='right'>Ana İş Adedi</th><th class='right'>Girilen İş Adedi</th><th class='right'>Fark</th><th>Durum</th></tr>{stage_trs}</table></div>
-    <div class="card"><h2>Son Eleman Kayıtları</h2>{entries_table(last_entries())}</div>
+    <div class="card"><h2>Son Çalışan Kayıtları</h2>{entries_table(last_entries())}</div>
     """
     return page("Katlama Atölyesi Ana Panel", body)
 
@@ -375,10 +376,10 @@ def workers():
         wa = f"https://wa.me/?text={quote(mesaj)}"
         trs += f"<tr><td>{w['id']}</td><td>{w['name']}</td><td>{w.get('phone') or ''}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td class='link-cell'><a class='copy' href='{link}' target='_blank' title='{link}'>{link}</a></td><td><div class='actions'><a class='btn cyan' href='{link}' target='_blank'>Aç</a><a class='btn green' href='{wa}' target='_blank'>WhatsApp</a><a class='btn yellow' href='/refresh-worker-token/{w['id']}'>Yeni Link</a><form class='inline' method='post' action='/delete-worker/{w['id']}'><button class='btn red' type='submit'>Sil</button></form></div></td></tr>"
     body = f"""
-    <div class="card"><h2>Eleman Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Eleman Kaydet</button></form></div>
-    <div class="card"><h2>Eleman Linkleri</h2><div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="10" class="center small">Eleman yok.</td></tr>'}</table></div></div>
+    <div class="card"><h2>Çalışan Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Çalışan Kaydet</button></form></div>
+    <div class="card"><h2>Çalışan Linkleri</h2><div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="10" class="center small">Çalışan yok.</td></tr>'}</table></div></div>
     """
-    return page("Eleman Linkleri", body)
+    return page("Çalışan Linkleri", body)
 
 
 @app.post("/add-worker")
@@ -391,7 +392,7 @@ def add_worker(name: str = Form(...), phone: str = Form("")):
 
 @app.get("/refresh-worker-token/{wid}")
 def refresh_worker_token(wid: int):
-    # Bu buton sadece seçilen elemanın linkini yeniler. Diğer elemanların linkleri değişmez.
+    # Bu buton sadece seçilen çalışanın linkini yeniler. Diğer çalışanların linkleri değişmez.
     exec_db("UPDATE workers SET token=%s WHERE id=%s", (secrets.token_urlsafe(14), wid))
     return RedirectResponse("/workers", status_code=303)
 
@@ -445,9 +446,9 @@ def products(error: Optional[str] = None):
     <div class="card"><h2>1. Firma Ekle</h2><form method="post" action="/save-firm"><div class="grid"><div><label>Firma Adı</label><input name="name" required></div></div><br><button class="btn green">Firmayı Kaydet</button></form><br><table><tr><th>ID</th><th>FİRMA</th></tr>{firm_trs}</table></div>
     <div class="card"><h2>2. Firmadan Alınan Ürün ve Fiyatı</h2><form method="post" action="/save-product"><div class="grid"><div><label>Firma</label><select name="firm_id" required>{firm_opts}</select></div><div><label>Ürün (örnek: Şal)</label><input name="name" required></div><div><label>Firmadan Alınan Birim Fiyat</label><input name="firm_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">Ürünü Kaydet / Güncelle</button></form><p class='small'>Bu fiyat ürünün tamamı içindir; her işçilik aşamasında yeniden hesaplanmaz.</p></div>
     <div class="card"><table><tr><th>ID</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>FİRMADAN ALINAN FİYAT</th><th>İŞLEM</th></tr>{trs}</table></div>
-    <div class="card"><h2>Adet Başı İşçilik ve Kâr Karşılaştırması</h2><p class='small'>Toplam işçilik, bütün adet başı işlerin toplamına paket ücretinin paket içindeki ürün sayısına düşen payı eklenerek hesaplanır.</p><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>PAKET TÜRÜ</th><th class='right'>FİRMADAN ALINAN / ADET</th><th class='right'>İŞÇİYE VERİLEN / ADET</th><th class='right'>SİZE KALAN / ADET</th></tr>{profit_trs}</table></div>
-    <div class="card"><h2>3. İşçiye Verilen İşleri Bölüştür</h2><form method="post" action="/save-work-type"><div class="grid"><div><label>Hangi Firma / Ürün?</label><select name="product_id" required>{opts}</select></div><div><label>Yapılan İş</label><input name="name" placeholder="Örnek: Şal Çoklu Paketleme" required></div><div><label>Ücret Nasıl Hesaplansın?</label><select name="pay_basis"><option value="piece">Ürün adedi başına</option><option value="package">Paket başına</option></select></div><div><label>İşçiye Verilen Ücret</label><input name="worker_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">İşçilik Aşamasını Kaydet</button></form><p class='small'>Çoklu paketlemede “Paket başına” seçin. Eleman paket sayısını ve 3'lü, 6'lı veya 7'li olduğunu seçer.</p></div>
-    <div class="card"><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>İŞÇİLİK AŞAMASI</th><th>HESAPLAMA</th><th class='right'>İŞÇİ ÜCRETİ</th><th>İŞLEM</th></tr>{wt_trs}</table></div>
+    <div class="card"><h2>Adet Başı İşçilik ve Kâr Karşılaştırması</h2><p class='small'>Toplam işçilik, bütün adet başı işlerin toplamına paket ücretinin paket içindeki ürün sayısına düşen payı eklenerek hesaplanır.</p><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>PAKET TÜRÜ</th><th class='right'>FİRMADAN ALINAN / ADET</th><th class='right'>ÇALIŞANA VERİLEN / ADET</th><th class='right'>SİZE KALAN / ADET</th></tr>{profit_trs}</table></div>
+    <div class="card"><h2>3. Çalışana Verilen İşleri Bölüştür</h2><form method="post" action="/save-work-type"><div class="grid"><div><label>Hangi Firma / Ürün?</label><select name="product_id" required>{opts}</select></div><div><label>Yapılan İş</label><input name="name" placeholder="Örnek: Şal Çoklu Paketleme" required></div><div><label>Ücret Nasıl Hesaplansın?</label><select name="pay_basis"><option value="piece">Ürün adedi başına</option><option value="package">Paket başına</option></select></div><div><label>Çalışana Verilen Ücret</label><input name="worker_price" type="number" step="0.01" min="0" required></div></div><br><button class="btn green">İşçilik Aşamasını Kaydet</button></form><p class='small'>Çoklu paketlemede “Paket başına” seçin. Çalışan paket sayısını ve 3'lü, 6'lı veya 7'li olduğunu seçer.</p></div>
+    <div class="card"><table><tr><th>FİRMA</th><th>ÜRÜN</th><th>İŞÇİLİK AŞAMASI</th><th>HESAPLAMA</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th>İŞLEM</th></tr>{wt_trs}</table></div>
     <div class="card"><h2>Silinen Kayıtları Geri Getir</h2><p class='small'>Yanlışlıkla sildiğiniz kaydın karşısındaki yeşil “Geri Getir” düğmesine basın.</p><table><tr><th>FİRMA</th><th>TÜR</th><th>KAYIT</th><th>İŞLEM</th></tr>{deleted_trs}</table></div>
     """
     return page("Firma / Ürün / Fiyat", body)
@@ -559,7 +560,7 @@ def get_worker_by_token(token: str):
 @app.get("/w/{token}", response_class=HTMLResponse)
 def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = None):
     worker = get_worker_by_token(token)
-    if not worker: return page("Link Geçersiz", "<div class='bad'>Bu eleman linki geçersiz veya pasif.</div>", nav=False)
+    if not worker: return page("Link Geçersiz", "<div class='bad'>Bu çalışan linki geçersiz veya pasif.</div>", nav=False)
     work_types = rows("""SELECT wt.id,wt.name,wt.worker_price,wt.pay_basis,p.name product_name,f.name firm_name
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
                         WHERE wt.active=1 AND p.active=1 ORDER BY f.name,p.name,wt.name""")
@@ -580,7 +581,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
         record_cards = "<div class='center small'>Henüz kayıt yok.</div>"
     kalan = num(total["earned"] if total else 0) - paid_total - adv_total
     body = f"""{msg}<div class="worker-hero"><div class="worker-title">{worker['name']} - İşçilik Paneli</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis three"><div class="kpi"><span>Bugünkü İş Adedim</span><b>{int(num(today_total['qty']))}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="3">3'lü</option><option value="6">6'lı</option><option value="7">7'li</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Son Kayıtlarım</h2><div class='record-list'>{record_cards}</div></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
-    return page("Eleman Paneli", body, nav=False)
+    return page("Çalışan Paneli", body, nav=False)
 
 
 @app.post("/w/{token}/add")
@@ -634,8 +635,8 @@ def edit_entry_form(eid: int):
     wopts = "".join([f"<option value='{w['id']}' {'selected' if w['id']==r['worker_id'] else ''}>{w['name']}</option>" for w in workers])
     popts = "".join([f"<option value='{w['id']}' {'selected' if w['id']==r.get('work_type_id') else ''}>{w['product_name']} — {w['name']}</option>" for w in work_types])
     pack_opts = "".join([f"<option value='{n}' {'selected' if n==int(r.get('package_size') or 1) else ''}>{n}'lü</option>" for n in (1,3,6,7)])
-    body = f"""<div class='card'><h2>Eleman Kaydı Güncelle</h2><form method='post' action='/edit-entry/{eid}'><div class='grid'><div><label>Tarih (Gün/Ay/Yıl)</label><input name='work_date' type='date' value='{r['work_date']}'></div><div><label>Çalışan</label><select name='worker_id'>{wopts}</select></div><div><label>Yapılan İş</label><select name='work_type_id'>{popts}</select></div><div><label>Adet / Paket Sayısı</label><input name='qty' type='number' min='1' value='{r['qty']}'></div><div><label>Paket İçi Adet</label><select name='package_size'>{pack_opts}</select></div><div><label>Not</label><input name='note' value='{r['note'] or ''}'></div></div><br><button class='btn green'>Güncelle</button></form></div>"""
-    return page("Eleman Kaydı Güncelle", body)
+    body = f"""<div class='card'><h2>Çalışan Kaydı Güncelle</h2><form method='post' action='/edit-entry/{eid}'><div class='grid'><div><label>Tarih (Gün/Ay/Yıl)</label><input name='work_date' type='date' value='{r['work_date']}'></div><div><label>Çalışan</label><select name='worker_id'>{wopts}</select></div><div><label>Yapılan İş</label><select name='work_type_id'>{popts}</select></div><div><label>Adet / Paket Sayısı</label><input name='qty' type='number' min='1' value='{r['qty']}'></div><div><label>Paket İçi Adet</label><select name='package_size'>{pack_opts}</select></div><div><label>Not</label><input name='note' value='{r['note'] or ''}'></div></div><br><button class='btn green'>Güncelle</button></form></div>"""
+    return page("Çalışan Kaydı Güncelle", body)
 
 
 @app.post("/edit-entry/{eid}")
@@ -681,7 +682,7 @@ def payments():
     trs = "".join([f"<tr><td>{r['id']}</td><td>{display_date(r['pay_date'])}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><form method='post' action='/delete-payment/{r['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in data]) or "<tr><td colspan='6' class='center small'>Ödeme yok.</td></tr>"
     advdata = rows("""SELECT a.id,a.adv_date,w.name worker,a.amount,COALESCE(a.note,'') note FROM advances a JOIN workers w ON w.id=a.worker_id ORDER BY a.adv_date DESC,a.id DESC LIMIT 500""")
     advtrs = "".join([f"<tr><td>{r['id']}</td><td>{display_date(r['adv_date'])}</td><td>{r['worker']}</td><td class='right'>{money(r['amount'])}</td><td>{r['note']}</td><td><form method='post' action='/delete-advance/{r['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in advdata]) or "<tr><td colspan='6' class='center small'>Avans yok.</td></tr>"
-    body = f"""<div class="card"><h2>Eleman Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="pay_date" type="date" value="{today()}" required></div><div><label>Eleman</label><select name="worker_id">{opts}</select></div><div><label>Ödeme Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><h2>Eleman Avansı</h2><form method="post" action="/add-advance"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="adv_date" type="date" value="{today()}" required></div><div><label>Eleman</label><select name="worker_id">{opts}</select></div><div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn yellow">Avans Kaydet</button></form></div><div class="card"><h2>Ödemeler</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>ÖDEME</th><th>NOT</th><th>İŞLEM</th></tr>{trs}</table></div><div class="card"><h2>Avanslar</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>AVANS</th><th>NOT</th><th>İŞLEM</th></tr>{advtrs}</table></div><div class="card"><h2>Eleman Genel Özeti</h2>{entries_table(last_entries(500))}</div>"""
+    body = f"""<div class="card"><h2>Çalışan Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="pay_date" type="date" value="{today()}" required></div><div><label>Çalışan</label><select name="worker_id">{opts}</select></div><div><label>Ödeme Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><h2>Çalışan Avansı</h2><form method="post" action="/add-advance"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="adv_date" type="date" value="{today()}" required></div><div><label>Çalışan</label><select name="worker_id">{opts}</select></div><div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn yellow">Avans Kaydet</button></form></div><div class="card"><h2>Ödemeler</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>ÖDEME</th><th>NOT</th><th>İŞLEM</th></tr>{trs}</table></div><div class="card"><h2>Avanslar</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>AVANS</th><th>NOT</th><th>İŞLEM</th></tr>{advtrs}</table></div><div class="card"><h2>Çalışan Genel Özeti</h2>{entries_table(last_entries(500))}</div>"""
     return page("Ödemeler", body)
 
 
@@ -728,9 +729,9 @@ def firm_month_summary(m: str):
     """, (m+"%",m+"%"))
 
 
-def worker_month_detail(m: str):
+def worker_month_detail(m: str, worker_id: Optional[int] = None):
     return rows("""
-        SELECT e.work_date,w.name worker,f.name firm_name,p.name product,wt.name work_type,
+        SELECT e.work_date,w.id worker_id,w.name worker,f.name firm_name,p.name product,wt.name work_type,
                e.package_size,SUM(e.qty) qty,SUM(e.qty*e.package_size) product_qty,
                e.worker_price,SUM(e.qty*e.worker_price) earned
         FROM entries e
@@ -738,24 +739,24 @@ def worker_month_detail(m: str):
         JOIN products p ON p.id=e.product_id
         JOIN firms f ON f.id=p.firm_id
         LEFT JOIN work_types wt ON wt.id=e.work_type_id
-        WHERE e.work_date LIKE %s
-        GROUP BY e.work_date,w.name,f.name,p.name,wt.name,e.package_size,e.worker_price
+        WHERE e.work_date LIKE %s AND (%s IS NULL OR e.worker_id=%s)
+        GROUP BY e.work_date,w.id,w.name,f.name,p.name,wt.name,e.package_size,e.worker_price
         ORDER BY w.name,e.work_date,wt.name
-    """, (m+"%",))
+    """, (m+"%",worker_id,worker_id))
 
 
-def worker_month_summary_rows(m: str):
+def worker_month_summary_rows(m: str, worker_id: Optional[int] = None):
     return rows("""
-        SELECT w.name worker,COALESCE(e.earned,0) earned,COALESCE(a.advance,0) advance,
+        SELECT w.id worker_id,w.name worker,COALESCE(e.earned,0) earned,COALESCE(a.advance,0) advance,
                COALESCE(py.paid,0) paid,
                COALESCE(e.earned,0)-COALESCE(a.advance,0)-COALESCE(py.paid,0) balance
         FROM workers w
         LEFT JOIN (SELECT worker_id,SUM(qty*worker_price) earned FROM entries WHERE work_date LIKE %s GROUP BY worker_id) e ON e.worker_id=w.id
         LEFT JOIN (SELECT worker_id,SUM(amount) advance FROM advances WHERE adv_date LIKE %s GROUP BY worker_id) a ON a.worker_id=w.id
         LEFT JOIN (SELECT worker_id,SUM(amount) paid FROM payments WHERE pay_date LIKE %s GROUP BY worker_id) py ON py.worker_id=w.id
-        WHERE w.active=1 AND (COALESCE(e.earned,0)<>0 OR COALESCE(a.advance,0)<>0 OR COALESCE(py.paid,0)<>0)
+        WHERE (%s IS NULL OR w.id=%s) AND (w.active=1 OR %s IS NOT NULL) AND (COALESCE(e.earned,0)<>0 OR COALESCE(a.advance,0)<>0 OR COALESCE(py.paid,0)<>0)
         ORDER BY w.name
-    """, (m+"%",m+"%",m+"%"))
+    """, (m+"%",m+"%",m+"%",worker_id,worker_id,worker_id))
 
 
 def firm_month_detail(m: str):
@@ -777,12 +778,12 @@ def month(m: Optional[str] = None):
     firm_rows = firm_month_summary(m)
     firm_trs = "".join([f"<tr><td>{r['firm_name']}</td><td class='right'>{int(num(r['delivered_qty']))}</td><td class='right'>{money(r['revenue'])}</td><td class='right'>{money(r['labor'])}</td><td class='right'>{money(r['profit'])}</td></tr>" for r in firm_rows]) or "<tr><td colspan='5' class='center small'>Bu ay firma kaydı yok.</td></tr>"
     worker_rows = worker_month_detail(m)
-    worker_trs = "".join([f"<tr><td>{display_date(r['work_date'])}</td><td>{r['worker']}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td>{r['work_type'] or r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{int(num(r['package_size'])) if int(num(r['package_size']))>1 else '-'}</td><td class='right'>{int(num(r['product_qty']))}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money(r['earned'])}</td></tr>" for r in worker_rows]) or "<tr><td colspan='10' class='center small'>Bu ay eleman işi yok.</td></tr>"
+    worker_trs = "".join([f"<tr><td>{display_date(r['work_date'])}</td><td>{r['worker']}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td>{r['work_type'] or r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{int(num(r['package_size'])) if int(num(r['package_size']))>1 else '-'}</td><td class='right'>{int(num(r['product_qty']))}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money(r['earned'])}</td></tr>" for r in worker_rows]) or "<tr><td colspan='10' class='center small'>Bu ay çalışan işi yok.</td></tr>"
     worker_summary = worker_month_summary_rows(m)
-    worker_summary_trs = "".join([f"<tr><td>{r['worker']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in worker_summary]) or "<tr><td colspan='5' class='center small'>Bu ay eleman hesabı yok.</td></tr>"
+    worker_summary_trs = "".join([f"<tr><td>{r['worker']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in worker_summary]) or "<tr><td colspan='5' class='center small'>Bu ay çalışan hesabı yok.</td></tr>"
     firm_daily_rows = firm_month_detail(m)
     firm_daily_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in firm_daily_rows]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
-    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"> <button class="btn green">Hesapla</button> <a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a> <a class="btn cyan" href="/month/workers?m={m}">Eleman Aylık Raporu</a> <a class="btn purple" href="/month/firms?m={m}">Firma Aylık Raporu</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik / Net Kalan</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Firma Bazlı Aylık Kâr Özeti</h2><p class='small'>Firma brüt kârı = Firmadan alınacak ücret − o firmaya ait işçi hakedişleri. Genel masraflar bu tabloda düşülmez.</p><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>İŞÇİ ÜCRETİ</th><th class='right'>SİZE KALAN BRÜT KÂR</th></tr>{firm_trs}</table></div><div class="card"><h2>Eleman Bazlı Aylık Hesap Özeti</h2><table><tr><th>ELEMAN</th><th class="right">TOPLAM HAKEDİŞ</th><th class="right">AVANS</th><th class="right">ÖDEME</th><th class="right">KALAN BAKİYE</th></tr>{worker_summary_trs}</table></div><div class="card"><h2>Eleman Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>ELEMAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class="right">ADET / PAKET</th><th class="right">PAKET İÇİ</th><th class="right">ÜRÜN ADEDİ</th><th class="right">BİRİM ÜCRET</th><th class="right">HAKEDİŞ</th></tr>{worker_trs}</table></div></div><div class="card"><h2>Firma Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class="right">TESLİM ADET</th><th class="right">BİRİM FİYAT</th><th class="right">FİRMA HAKEDİŞİ</th></tr>{firm_daily_trs}</table></div></div>"""
+    body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"> <button class="btn green">Hesapla</button> <a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a> <a class="btn cyan" href="/month/workers?m={m}">Çalışan Aylık Raporu</a> <a class="btn purple" href="/month/firms?m={m}">Firma Aylık Raporu</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik / Net Kalan</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Firma Bazlı Aylık Kâr Özeti</h2><p class='small'>Firma brüt kârı = Firmadan alınacak ücret − o firmaya ait çalışan hakedişleri. Genel masraflar bu tabloda düşülmez.</p><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>SİZE KALAN BRÜT KÂR</th></tr>{firm_trs}</table></div><div class="card"><h2>Çalışan Bazlı Aylık Hesap Özeti</h2><table><tr><th>ÇALIŞAN</th><th class="right">TOPLAM HAKEDİŞ</th><th class="right">AVANS</th><th class="right">ÖDEME</th><th class="right">KALAN BAKİYE</th></tr>{worker_summary_trs}</table></div><div class="card"><h2>Çalışan Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class="right">ADET / PAKET</th><th class="right">PAKET İÇİ</th><th class="right">ÜRÜN ADEDİ</th><th class="right">BİRİM ÜCRET</th><th class="right">HAKEDİŞ</th></tr>{worker_trs}</table></div></div><div class="card"><h2>Firma Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class="right">TESLİM ADET</th><th class="right">BİRİM FİYAT</th><th class="right">FİRMA HAKEDİŞİ</th></tr>{firm_daily_trs}</table></div></div>"""
     return page("Ay Sonu", body)
 
 
@@ -797,15 +798,15 @@ def export_month(m: Optional[str] = None):
         wr = csv.writer(f, delimiter=";")
         wr.writerow(["Ay", m]); wr.writerow(["Firma Teslim Adet", int(num(sm["qty"]))]); wr.writerow(["Firma Hak Ediş", f"{sm['revenue']:.2f}"]); wr.writerow(["İşçilik Net Kalan", f"{sm['labor']:.2f}"]); wr.writerow(["Masraflar", f"{sm['expense']:.2f}"]); wr.writerow(["Net Kazanç", f"{sm['net']:.2f}"]); wr.writerow([])
         wr.writerow(["FİRMA BAZLI AYLIK KÂR ÖZETİ"])
-        wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","İŞÇİ ÜCRETİ","SİZE KALAN BRÜT KÂR"])
+        wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","ÇALIŞAN ÜCRETİ","SİZE KALAN BRÜT KÂR"])
         for r in firm_data: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),f"{num(r['revenue']):.2f}",f"{num(r['labor']):.2f}",f"{num(r['profit']):.2f}"])
         wr.writerow([])
-        wr.writerow(["ELEMAN BAZLI AYLIK HESAP ÖZETİ"])
-        wr.writerow(["ELEMAN","TOPLAM HAKEDİŞ","AVANS","ÖDEME","KALAN BAKİYE"])
+        wr.writerow(["ÇALIŞAN BAZLI AYLIK HESAP ÖZETİ"])
+        wr.writerow(["ÇALIŞAN","TOPLAM HAKEDİŞ","AVANS","ÖDEME","KALAN BAKİYE"])
         for r in worker_summary_data: wr.writerow([r['worker'],f"{num(r['earned']):.2f}",f"{num(r['advance']):.2f}",f"{num(r['paid']):.2f}",f"{num(r['balance']):.2f}"])
         wr.writerow([])
-        wr.writerow(["ELEMAN BAZLI GÜN GÜN AYLIK DÖKÜM"])
-        wr.writerow(["TARİH","ELEMAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET / PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM ÜCRET","HAKEDİŞ"])
+        wr.writerow(["ÇALIŞAN BAZLI GÜN GÜN AYLIK DÖKÜM"])
+        wr.writerow(["TARİH","ÇALIŞAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET / PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM ÜCRET","HAKEDİŞ"])
         for r in worker_data: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),f"{num(r['worker_price']):.2f}",f"{num(r['earned']):.2f}"])
         wr.writerow([])
         wr.writerow(["FİRMA BAZLI GÜN GÜN AYLIK DÖKÜM"])
@@ -815,18 +816,23 @@ def export_month(m: Optional[str] = None):
 
 
 @app.get("/month/workers", response_class=HTMLResponse)
-def worker_month_report(m: Optional[str] = None):
+def worker_month_report(m: Optional[str] = None, worker_id: Optional[int] = None):
     m = m or this_month()
-    summary = worker_month_summary_rows(m)
-    detail = worker_month_detail(m)
+    worker_id = worker_id or None
+    summary = worker_month_summary_rows(m, worker_id)
+    detail = worker_month_detail(m, worker_id)
+    worker_options = "<option value='0'>Tüm çalışanlar</option>"
+    for worker in rows("SELECT id,name FROM workers ORDER BY name,id"):
+        selected = " selected" if worker["id"] == worker_id else ""
+        worker_options += f"<option value='{worker['id']}'{selected}>{escape(worker['name'])}</option>"
     total_earned = sum(num(r["earned"]) for r in summary)
     total_advance = sum(num(r["advance"]) for r in summary)
     total_paid = sum(num(r["paid"]) for r in summary)
     total_balance = sum(num(r["balance"]) for r in summary)
-    summary_trs = "".join([f"<tr><td>{r['worker']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay eleman hesabı yok.</td></tr>"
+    summary_trs = "".join([f"<tr><td>{r['worker']}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay çalışan hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['work_date'])}</td><td>{r['worker']}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td>{r['work_type'] or r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{int(num(r['package_size'])) if int(num(r['package_size']))>1 else '-'}</td><td class='right'>{int(num(r['product_qty']))}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money(r['earned'])}</td></tr>" for r in detail]) or "<tr><td colspan='10' class='center small'>Bu ay iş kaydı yok.</td></tr>"
-    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-workers?m={m}'>Eleman Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Hakediş</span><b>{money(total_earned)}</b></div><div class='kpi'><span>Toplam Avans</span><b>{money(total_advance)}</b></div><div class='kpi'><span>Toplam Ödeme</span><b>{money(total_paid)}</b></div><div class='kpi'><span>Toplam Kalan</span><b>{money(total_balance)}</b></div></div><div class='card'><h2>Eleman Aylık Hesap Toplamları</h2><table><tr><th>ELEMAN</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>KALAN</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{money(total_earned)}</th><th class='right'>{money(total_advance)}</th><th class='right'>{money(total_paid)}</th><th class='right'>{money(total_balance)}</th></tr></table></div><div class='card'><h2>Gün Gün Yapılan İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>ELEMAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class='right'>ADET/PAKET</th><th class='right'>PAKET İÇİ</th><th class='right'>ÜRÜN ADEDİ</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
-    return page("Eleman Aylık Raporu", body)
+    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-worker'>Çalışan seç</label><select id='report-worker' name='worker_id' style='max-width:280px;display:inline-block'>{worker_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-workers?m={m}&amp;worker_id={worker_id or 0}'>Çalışan Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Hakediş</span><b>{money(total_earned)}</b></div><div class='kpi'><span>Toplam Avans</span><b>{money(total_advance)}</b></div><div class='kpi'><span>Toplam Ödeme</span><b>{money(total_paid)}</b></div><div class='kpi'><span>Toplam Kalan</span><b>{money(total_balance)}</b></div></div><div class='card'><h2>Çalışan Aylık Hesap Toplamları</h2><table><tr><th>ÇALIŞAN</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>KALAN</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{money(total_earned)}</th><th class='right'>{money(total_advance)}</th><th class='right'>{money(total_paid)}</th><th class='right'>{money(total_balance)}</th></tr></table></div><div class='card'><h2>Gün Gün Yapılan İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class='right'>ADET/PAKET</th><th class='right'>PAKET İÇİ</th><th class='right'>ÜRÜN ADEDİ</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    return page("Çalışan Aylık Raporu", body)
 
 
 @app.get("/month/firms", response_class=HTMLResponse)
@@ -840,22 +846,23 @@ def firm_month_report(m: Optional[str] = None):
     total_profit = sum(num(r["profit"]) for r in summary)
     summary_trs = "".join([f"<tr><td>{r['firm_name']}</td><td class='right'>{int(num(r['delivered_qty']))}</td><td class='right'>{money(r['revenue'])}</td><td class='right'>{money(r['labor'])}</td><td class='right'>{money(r['profit'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay firma hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{r['firm_name']}</td><td>{r['product']}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in detail]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
-    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>İşçi Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>İŞÇİ ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
     return page("Firma Aylık Raporu", body)
 
 
 @app.get("/export-workers")
-def export_workers(m: Optional[str] = None):
-    m = m or this_month(); out = Path(f"eleman_aylik_rapor_{m}.csv")
-    summary = worker_month_summary_rows(m); detail = worker_month_detail(m)
+def export_workers(m: Optional[str] = None, worker_id: Optional[int] = None):
+    worker_id = worker_id or None
+    m = m or this_month(); out = Path(f"calisan_aylik_rapor_{m}_{worker_id or 'tumu'}.csv")
+    summary = worker_month_summary_rows(m, worker_id); detail = worker_month_detail(m, worker_id)
     with out.open("w", newline="", encoding="utf-8-sig") as f:
         wr = csv.writer(f, delimiter=";")
-        wr.writerow(["ELEMAN AYLIK HESAP TOPLAMLARI",m])
-        wr.writerow(["ELEMAN","HAKEDİŞ","AVANS","ÖDEME","KALAN"])
+        wr.writerow(["ÇALIŞAN AYLIK HESAP TOPLAMLARI",m])
+        wr.writerow(["ÇALIŞAN","HAKEDİŞ","AVANS","ÖDEME","KALAN"])
         for r in summary: wr.writerow([r['worker'],f"{num(r['earned']):.2f}",f"{num(r['advance']):.2f}",f"{num(r['paid']):.2f}",f"{num(r['balance']):.2f}"])
         wr.writerow(["GENEL TOPLAM",f"{sum(num(r['earned']) for r in summary):.2f}",f"{sum(num(r['advance']) for r in summary):.2f}",f"{sum(num(r['paid']) for r in summary):.2f}",f"{sum(num(r['balance']) for r in summary):.2f}"])
         wr.writerow([]); wr.writerow(["GÜN GÜN YAPILAN İŞLER"])
-        wr.writerow(["TARİH","ELEMAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET/PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM TL","TOPLAM TL"])
+        wr.writerow(["TARİH","ÇALIŞAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET/PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM TL","TOPLAM TL"])
         for r in detail: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),f"{num(r['worker_price']):.2f}",f"{num(r['earned']):.2f}"])
     return FileResponse(out,filename=out.name)
 
@@ -867,7 +874,7 @@ def export_firms(m: Optional[str] = None):
     with out.open("w", newline="", encoding="utf-8-sig") as f:
         wr = csv.writer(f, delimiter=";")
         wr.writerow(["FİRMA AYLIK HESAP TOPLAMLARI",m])
-        wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","İŞÇİ ÜCRETİ","BRÜT KÂR"])
+        wr.writerow(["FİRMA","TESLİM ADET","FİRMA HAKEDİŞİ","ÇALIŞAN ÜCRETİ","BRÜT KÂR"])
         for r in summary: wr.writerow([r['firm_name'],int(num(r['delivered_qty'])),f"{num(r['revenue']):.2f}",f"{num(r['labor']):.2f}",f"{num(r['profit']):.2f}"])
         wr.writerow(["GENEL TOPLAM",int(sum(num(r['delivered_qty']) for r in summary)),f"{sum(num(r['revenue']) for r in summary):.2f}",f"{sum(num(r['labor']) for r in summary):.2f}",f"{sum(num(r['profit']) for r in summary):.2f}"])
         wr.writerow([]); wr.writerow(["GÜN GÜN FİRMAYA TESLİM EDİLEN İŞLER"])
