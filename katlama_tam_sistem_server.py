@@ -640,6 +640,10 @@ def entries_table(data):
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     sm = total_summary()
+    firm_accounts = firm_account_summary()
+    firm_collected = sum(num(r["collected"]) for r in firm_accounts)
+    firm_advance = sum(num(r["advance"]) for r in firm_accounts)
+    firm_balance = sum(num(r["balance"]) for r in firm_accounts)
     compare = rows("""
     SELECT f.name firm_name,p.name product, COALESCE(fd.firm_qty,0) firm_qty,
            COALESCE(en.worker_qty,0) worker_qty,
@@ -677,6 +681,7 @@ def dashboard():
     body = f"""
     <div class="card"><div class="notice">Ana panel tarih aralığı kullanmaz. İşçilik kutusu alttaki NET KALAN sütununun toplamıdır.</div></div>
     <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
+    <div class="card"><h2>Firma Ödeme ve Alacak Durumu</h2><div class="kpis three"><div class="kpi"><span>Firmalardan Alınan Ödeme</span><b>{money(firm_collected)}</b></div><div class="kpi"><span>Firmalardan Alınan Avans</span><b>{money(firm_advance)}</b></div><a class="kpi" href="/month/firms"><span>Kalan Alacak / Sonraki Aya Devir</span><b>{money(firm_balance)}</b><span>Firma bazlı aylık raporu aç</span></a></div><p class="small">Tüm kayıtların toplamıdır. Kalan alacak = Firma hakedişi − Alınan ödeme − Alınan avans. Ay bazındaki devir için kutuya dokunun.</p></div>
     <div class="card"><h2>Firma Teslimi ve Ana Ürün Adedi</h2><p class='small'>Her ürün için seçtiğiniz “Ana Adet” işi gerçek ürün adedi kabul edilir.</p><table><tr><th>Firma</th><th>Ürün</th><th class='right'>Firma Teslim Adet</th><th class='right'>Ana İş Adedi</th><th class='right'>Fark</th></tr>{comp}</table></div>
     <div class="card"><h2>İşçilik Adet Kontrolü</h2><p class='small'>Her işin adedi, o firma ve ürün için seçtiğiniz ana işin adediyle karşılaştırılır. Fark sıfırsa doğru, artıysa fazla, eksiyse eksik girilmiştir.</p><table><tr><th>Firma</th><th>Ürün</th><th>Yapılan İş</th><th class='right'>Ana İş Adedi</th><th class='right'>Girilen İş Adedi</th><th class='right'>Fark</th><th>Durum</th></tr>{stage_trs}</table></div>
     <div class="card"><h2>Son Çalışan Kayıtları</h2>{entries_table(last_entries())}</div>
