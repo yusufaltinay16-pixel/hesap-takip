@@ -1122,7 +1122,7 @@ def firm_receipt_detail(m: Optional[str] = None, firm_id: Optional[int] = None):
 def firm_account_table(accounts):
     trs = ''.join(f"<tr><td>{escape(r['firm_name'])}</td><td class='right'>{money(r['opening'])}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['collected'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in accounts)
     totals = ''.join(f"<th class='right'>{money(sum(num(r[k]) for r in accounts))}</th>" for k in ('opening','earned','collected','advance','balance'))
-    return f"<div class='card'><h2>Firma Alacak Hesabı</h2><p class='small'>Kalan alacak = Önceki dönemden devir + Hakediş − Tahsilat − Alınan avans. Eksi bakiye, hakedişi aşan ödeme alındığını gösterir.</p><div class='table-wrap'><table><tr><th>FİRMA</th><th>DEVİR</th><th>HAKEDİŞ</th><th>TAHSİLAT</th><th>ALINAN AVANS</th><th>KALAN ALACAK</th></tr>{trs}<tr><th>TOPLAM</th>{totals}</tr></table></div></div>"
+    return f"<div class='card'><h2>Firma Alacak Hesabı</h2><p class='small'>Kalan alacak = Önceki dönemden devir + Hakediş − Tahsilat − Alınan avans. Eksi bakiye, hakedişi aşan ödeme alındığını gösterir.</p><div class='table-wrap'><table><tr><th>FİRMA</th><th>DEVİR</th><th>HAKEDİŞ</th><th>TAHSİLAT</th><th>ALINAN AVANS</th><th>KALAN ALACAK / SONRAKİ AYA DEVİR</th></tr>{trs}<tr><th>TOPLAM</th>{totals}</tr></table></div></div>"
 
 
 def firm_receipt_table(receipts, allow_delete=False):
@@ -1155,7 +1155,7 @@ def add_firm_receipt(firm_id: int = Form(...), receipt_date: str = Form(...), ki
     if not valid or not one('SELECT id FROM firms WHERE id=%s AND active=1', (firm_id,)):
         return RedirectResponse('/firm-receipts?error='+quote('Firma, tarih, işlem türü ve pozitif tutarı kontrol edin.'), status_code=303)
     exec_db('INSERT INTO firm_receipts(firm_id,receipt_date,kind,amount,note,created_at) VALUES(%s,%s,%s,%s,%s,%s)', (firm_id,receipt_date,kind,amount,note,now_iso()))
-    return RedirectResponse('/firm-receipts?saved=1', status_code=303)
+    return RedirectResponse('/month/firms?m='+receipt_date[:7]+'&firm_id='+str(firm_id), status_code=303)
 
 
 @app.post('/firm-receipts/{rid}/delete')
@@ -1307,14 +1307,19 @@ def firm_month_report(m: Optional[str] = None, firm_id: Optional[int] = None):
     for firm in rows("SELECT id,name FROM firms ORDER BY name,id"):
         selected = " selected" if firm["id"] == firm_id else ""
         firm_options += f"<option value='{firm['id']}'{selected}>{escape(firm['name'])}</option>"
+    accounts = firm_account_summary(m, firm_id)
+    opening_balance = sum(num(r["opening"]) for r in accounts)
+    collected_total = sum(num(r["collected"]) for r in accounts)
+    advance_total = sum(num(r["advance"]) for r in accounts)
+    closing_balance = sum(num(r["balance"]) for r in accounts)
     total_qty = sum(num(r["delivered_qty"]) for r in summary)
     total_revenue = sum(num(r["revenue"]) for r in summary)
     total_labor = sum(num(r["labor"]) for r in summary)
     total_profit = sum(num(r["profit"]) for r in summary)
     summary_trs = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td class='right'>{int(num(r['delivered_qty']))}</td><td class='right'>{money(r['revenue'])}</td><td class='right'>{money(r['labor'])}</td><td class='right'>{money(r['profit'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay firma hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in detail]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
-    body = f"""<div class='card'><h2>{escape(firm_title)}</h2><p>Firma Aylık Raporu — {escape(m)}</p></div><div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-firm'>Firma seç</label><select id='report-firm' name='firm_id' style='max-width:280px;display:inline-block'>{firm_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}&amp;firm_id={firm_id or 0}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Firmalardan Alınacak</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div></div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
-    body += firm_account_table(firm_account_summary(m, firm_id))
+    body = f"""<div class='card'><h2>{escape(firm_title)}</h2><p>Firma Aylık Raporu — {escape(m)}</p></div><div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-firm'>Firma seç</label><select id='report-firm' name='firm_id' style='max-width:280px;display:inline-block'>{firm_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-firms?m={m}&amp;firm_id={firm_id or 0}'>Firma Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Teslim Adedi</span><b>{int(total_qty)}</b></div><div class='kpi'><span>Bu Ayki Firma Hakedişi</span><b>{money(total_revenue)}</b></div><div class='kpi'><span>Çalışan Ücretleri</span><b>{money(total_labor)}</b></div><div class='kpi'><span>Brüt Kâr</span><b>{money(total_profit)}</b></div><div class='kpi'><span>Önceki Aydan Devir</span><b>{money(opening_balance)}</b></div><div class='kpi'><span>Bu Ay Alınan Ödeme</span><b>{money(collected_total)}</b></div><div class='kpi'><span>Bu Ay Alınan Avans</span><b>{money(advance_total)}</b></div><div class='kpi'><span>Kalan Alacak / Sonraki Aya Devir</span><b>{money(closing_balance)}</b></div></div><div class='notice'>Kalan alacak = Önceki aydan devir + Bu ayki hakediş − Alınan ödeme − Alınan avans. Bu kalan, sonraki ayın devrine otomatik geçer.</div><div class='card'><h2>Firma Aylık Hesap Toplamları</h2><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>BRÜT KÂR</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{int(total_qty)}</th><th class='right'>{money(total_revenue)}</th><th class='right'>{money(total_labor)}</th><th class='right'>{money(total_profit)}</th></tr></table></div><div class='card'><h2>Gün Gün Firmaya Teslim Edilen İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>ADET</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body += firm_account_table(accounts)
     body += firm_receipt_table(firm_receipt_detail(m, firm_id))
     return page("Firma Aylık Raporu", body)
 
@@ -1357,7 +1362,7 @@ def export_firms(m: Optional[str] = None, firm_id: Optional[int] = None):
         for r in detail: wr.writerow([display_date(r['deliv_date']),r['firm_name'],r['product'],int(num(r['qty'])),csv_money(num(r['firm_price'])),csv_money(num(r['amount']))])
         wr.writerow([])
         wr.writerow(['FİRMA ALACAK HESABI'])
-        wr.writerow(['FİRMA','ÖNCEKİ DÖNEMDEN DEVİR','HAKEDİŞ','TAHSİLAT','ALINAN AVANS','KALAN ALACAK'])
+        wr.writerow(['FİRMA','ÖNCEKİ DÖNEMDEN DEVİR','HAKEDİŞ','TAHSİLAT','ALINAN AVANS','KALAN ALACAK / SONRAKİ AYA DEVİR'])
         accounts = firm_account_summary(m, firm_id)
         for r in accounts:
             wr.writerow([r['firm_name']] + [csv_money(r[k]) for k in ('opening','earned','collected','advance','balance')])
@@ -1373,5 +1378,6 @@ if __name__ == "__main__":
     init_db()
     print("="*70); print("KATLAMA ATÖLYESİ PROFESYONEL SİSTEM BAŞLADI"); print(f"Yönetim paneli: http://127.0.0.1:{PORT}/dashboard"); print(f"Aynı Wi-Fi telefon: http://{local_ip()}:{PORT}"); print("="*70)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
 
 
