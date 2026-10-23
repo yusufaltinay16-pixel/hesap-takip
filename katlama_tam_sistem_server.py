@@ -639,9 +639,14 @@ def entries_table(data):
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    sm = total_summary()
-    firm_accounts = firm_account_summary()
+def dashboard(m: Optional[str] = None):
+    m = m or this_month()
+    sm = month_summary(m)
+    worker_accounts = worker_month_summary_rows(m)
+    worker_opening = sum(num(r['opening']) for r in worker_accounts)
+    worker_balance = sum(num(r['balance']) for r in worker_accounts)
+    firm_accounts = firm_account_summary(m)
+    firm_opening = sum(num(r['opening']) for r in firm_accounts)
     firm_collected = sum(num(r["collected"]) for r in firm_accounts)
     firm_advance = sum(num(r["advance"]) for r in firm_accounts)
     firm_balance = sum(num(r["balance"]) for r in firm_accounts)
@@ -651,11 +656,11 @@ def dashboard():
            COALESCE(en.worker_qty,0)-COALESCE(fd.firm_qty,0) diff
     FROM products p
     JOIN firms f ON f.id=p.firm_id
-    LEFT JOIN (SELECT product_id,SUM(firm_qty) firm_qty FROM deliveries GROUP BY product_id) fd ON fd.product_id=p.id
-    LEFT JOIN (SELECT e.product_id,SUM(e.qty) worker_qty FROM entries e JOIN work_types wt ON wt.id=e.work_type_id WHERE wt.counts_product=1 GROUP BY e.product_id) en ON en.product_id=p.id
+    LEFT JOIN (SELECT product_id,SUM(firm_qty) firm_qty FROM deliveries WHERE deliv_date LIKE %s GROUP BY product_id) fd ON fd.product_id=p.id
+    LEFT JOIN (SELECT e.product_id,SUM(e.qty) worker_qty FROM entries e JOIN work_types wt ON wt.id=e.work_type_id WHERE wt.counts_product=1 AND e.work_date LIKE %s GROUP BY e.product_id) en ON en.product_id=p.id
     WHERE p.active=1 AND (COALESCE(fd.firm_qty,0)>0 OR COALESCE(en.worker_qty,0)>0)
     ORDER BY f.name,p.name
-    """)
+    """, (m+'%', m+'%'))
     comp = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{int(num(r['worker_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td></tr>" for r in compare]) or "<tr><td colspan='5' class='center small'>Henüz kayıt yok.</td></tr>"
     stage_compare = rows("""
     SELECT f.name firm_name,p.name product,wt.name work_type,
@@ -668,24 +673,27 @@ def dashboard():
     LEFT JOIN (
         SELECT e.product_id,SUM(e.qty) folded_qty
         FROM entries e JOIN work_types x ON x.id=e.work_type_id
-        WHERE x.counts_product=1 GROUP BY e.product_id
+        WHERE x.counts_product=1 AND e.work_date LIKE %s GROUP BY e.product_id
     ) k ON k.product_id=p.id
     LEFT JOIN (
         SELECT e.work_type_id,SUM(e.qty*e.package_size) stage_qty
-        FROM entries e GROUP BY e.work_type_id
+        FROM entries e WHERE e.work_date LIKE %s GROUP BY e.work_type_id
     ) en ON en.work_type_id=wt.id
     WHERE p.active=1 AND wt.active=1 AND wt.counts_product=0
       AND (COALESCE(k.folded_qty,0)>0 OR COALESCE(en.stage_qty,0)>0)
     ORDER BY f.name,p.name,wt.name
-    """)
+    """, (m+'%', m+'%'))
     stage_trs = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or ""))}</td><td class='right'>{int(num(r['folded_qty']))}</td><td class='right'>{int(num(r['stage_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td><td class='{diff_class(r['diff'])}'>{'DOĞRU' if int(num(r['diff']))==0 else 'FAZLA' if num(r['diff'])>0 else 'EKSİK'}</td></tr>" for r in stage_compare]) or "<tr><td colspan='7' class='center small'>Kontrol edilecek işçilik kaydı yok.</td></tr>"
     body = f"""
-    <div class="card"><div class="notice">Ana panel tarih aralığı kullanmaz. İşçilik kutusu alttaki NET KALAN sütununun toplamıdır.</div></div>
-    <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
-    <div class="card"><h2>Firma Ödeme ve Alacak Durumu</h2><div class="kpis three"><div class="kpi"><span>Firmalardan Alınan Ödeme</span><b>{money(firm_collected)}</b></div><div class="kpi"><span>Firmalardan Alınan Avans</span><b>{money(firm_advance)}</b></div><a class="kpi" href="/month/firms"><span>Kalan Alacak / Sonraki Aya Devir</span><b>{money(firm_balance)}</b><span>Firma bazlı aylık raporu aç</span></a></div><p class="small">Tüm kayıtların toplamıdır. Kalan alacak = Firma hakedişi − Alınan ödeme − Alınan avans. Ay bazındaki devir için kutuya dokunun.</p></div>
+    <div class="card"><form method="get" action="/dashboard"><label for="dashboard-month">Ay seç</label><input id="dashboard-month" type="month" name="m" value="{m}" required style="max-width:200px;display:inline-block"> <button class="btn green">Göster</button> <a class="btn cyan" href="/month?m={m}">Ay Sonu Raporları</a></form><p class="small">Tüm adetler, gelirler, giderler ve hareketler seçilen aya aittir. Önceki aylardan kalan bakiyeler devir olarak gösterilir.</p></div>
+    <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>Bu Ay İşçilik Hakedişi</span><b>{money(sm['hakedis'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
+    <div class="card"><h2>Firma Ödeme ve Alacak Durumu</h2><div class="kpis three"><div class="kpi"><span>Firmalardan Alınan Ödeme</span><b>{money(firm_collected)}</b></div><div class="kpi"><span>Firmalardan Alınan Avans</span><b>{money(firm_advance)}</b></div><a class="kpi" href="/month/firms?m={m}"><span>Kalan Alacak / Sonraki Aya Devir</span><b>{money(firm_balance)}</b><span>Firma bazlı aylık raporu aç</span></a></div><p class="small">Önceki aydan firma alacağı: {money(firm_opening)}. Kalan alacak = Devir + Bu ay hakediş − Bu ay tahsilat − Bu ay avans.</p></div>
+    <div class="card"><h2>Çalışan Ödeme ve Borç Durumu</h2><div class="kpis"><div class="kpi"><span>Önceki Aydan Çalışan Borcu</span><b>{money(worker_opening)}</b></div><div class="kpi"><span>Bu Ay Hakediş</span><b>{money(sm['hakedis'])}</b></div><div class="kpi"><span>Bu Ay Ödeme</span><b>{money(sm['paid'])}</b></div><div class="kpi"><span>Bu Ay Avans</span><b>{money(sm['advance'])}</b></div><a class="kpi" href="/month/workers?m={m}"><span>Kalan Çalışan Borcu / Sonraki Aya Devir</span><b>{money(worker_balance)}</b></a></div><p class="small">Kalan borç = Önceki aydan devir + Bu ay hakediş − Bu ay ödeme − Bu ay avans.</p></div>
+    {worker_account_table(worker_accounts)}
+    {firm_account_table(firm_accounts)}
     <div class="card"><h2>Firma Teslimi ve Ana Ürün Adedi</h2><p class='small'>Her ürün için seçtiğiniz “Ana Adet” işi gerçek ürün adedi kabul edilir.</p><table><tr><th>Firma</th><th>Ürün</th><th class='right'>Firma Teslim Adet</th><th class='right'>Ana İş Adedi</th><th class='right'>Fark</th></tr>{comp}</table></div>
     <div class="card"><h2>İşçilik Adet Kontrolü</h2><p class='small'>Her işin adedi, o firma ve ürün için seçtiğiniz ana işin adediyle karşılaştırılır. Fark sıfırsa doğru, artıysa fazla, eksiyse eksik girilmiştir.</p><table><tr><th>Firma</th><th>Ürün</th><th>Yapılan İş</th><th class='right'>Ana İş Adedi</th><th class='right'>Girilen İş Adedi</th><th class='right'>Fark</th><th>Durum</th></tr>{stage_trs}</table></div>
-    <div class="card"><h2>Son Çalışan Kayıtları</h2>{entries_table(last_entries())}</div>
+    <div class="card"><h2>Son Çalışan Kayıtları</h2>{entries_table(last_entries(month=m))}</div>
     """
     return page("Katlama Atölyesi Ana Panel", body)
 
@@ -1212,17 +1220,37 @@ def worker_month_detail(m: str, worker_id: Optional[int] = None):
 
 
 def worker_month_summary_rows(m: str, worker_id: Optional[int] = None):
+    start = m + '-01'
+    d = datetime.strptime(m, '%Y-%m')
+    end = date(d.year + (d.month == 12), 1 if d.month == 12 else d.month + 1, 1).isoformat()
     return rows("""
-        SELECT w.id worker_id,w.name worker,COALESCE(e.earned,0) earned,COALESCE(a.advance,0) advance,
-               COALESCE(py.paid,0) paid,
-               COALESCE(e.earned,0)-COALESCE(a.advance,0)-COALESCE(py.paid,0) balance
-        FROM workers w
-        LEFT JOIN (SELECT worker_id,SUM(qty*worker_price) earned FROM entries WHERE work_date LIKE %s GROUP BY worker_id) e ON e.worker_id=w.id
-        LEFT JOIN (SELECT worker_id,SUM(amount) advance FROM advances WHERE adv_date LIKE %s GROUP BY worker_id) a ON a.worker_id=w.id
-        LEFT JOIN (SELECT worker_id,SUM(amount) paid FROM payments WHERE pay_date LIKE %s GROUP BY worker_id) py ON py.worker_id=w.id
-        WHERE (%s IS NULL OR w.id=%s) AND (w.active=1 OR %s IS NOT NULL) AND (COALESCE(e.earned,0)<>0 OR COALESCE(a.advance,0)<>0 OR COALESCE(py.paid,0)<>0)
+        WITH movements AS (
+          SELECT worker_id,work_date dt,qty*worker_price earned,0::double precision advance,0::double precision paid FROM entries
+          UNION ALL SELECT worker_id,adv_date,0,amount,0 FROM advances
+          UNION ALL SELECT worker_id,pay_date,0,0,amount FROM payments
+        ), totals AS (
+          SELECT worker_id,
+            SUM(CASE WHEN dt<%s THEN earned-advance-paid ELSE 0 END) opening,
+            SUM(CASE WHEN dt>=%s THEN earned ELSE 0 END) earned,
+            SUM(CASE WHEN dt>=%s THEN advance ELSE 0 END) advance,
+            SUM(CASE WHEN dt>=%s THEN paid ELSE 0 END) paid,
+            SUM(earned-advance-paid) balance
+          FROM movements WHERE dt<%s GROUP BY worker_id
+        )
+        SELECT w.id worker_id,w.name worker,t.opening,t.earned,t.advance,t.paid,t.balance
+        FROM workers w JOIN totals t ON t.worker_id=w.id
+        WHERE (%s IS NULL OR w.id=%s)
+          AND (t.opening<>0 OR t.earned<>0 OR t.advance<>0 OR t.paid<>0)
         ORDER BY w.name
-    """, (m+"%",m+"%",m+"%",worker_id,worker_id,worker_id))
+    """, (start,start,start,start,end,worker_id,worker_id))
+
+
+def worker_account_table(accounts):
+    columns = ('opening','earned','advance','paid','balance')
+    trs = ''.join("<tr><td>" + escape(r['worker']) + "</td>" + ''.join(
+        f"<td class='right'>{money(r[k])}</td>" for k in columns) + "</tr>" for r in accounts)
+    totals = ''.join(f"<th class='right'>{money(sum(num(r[k]) for r in accounts))}</th>" for k in columns)
+    return "<div class='card'><h2>Çalışan Borç ve Devir Hesabı</h2><div class='table-wrap'><table><tr><th>ÇALIŞAN</th><th class='right'>ÖNCEKİ AYDAN DEVİR</th><th class='right'>BU AY HAKEDİŞ</th><th class='right'>BU AY AVANS</th><th class='right'>BU AY ÖDEME</th><th class='right'>KALAN BORÇ / SONRAKİ AYA DEVİR</th></tr>" + trs + "<tr><th>TOPLAM</th>" + totals + "</tr></table></div></div>"
 
 
 def firm_month_detail(m: str, firm_id: Optional[int] = None):
@@ -1250,6 +1278,7 @@ def month(m: Optional[str] = None):
     firm_daily_rows = firm_month_detail(m)
     firm_daily_trs = "".join([f"<tr><td>{display_date(r['deliv_date'])}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{money(r['firm_price'])}</td><td class='right'>{money(r['amount'])}</td></tr>" for r in firm_daily_rows]) or "<tr><td colspan='6' class='center small'>Bu ay firma teslimi yok.</td></tr>"
     body = f"""<div class="card"><form method="get" action="/month"><label>Ay seç: YYYY-AA</label><input name="m" value="{m}" style="max-width:180px;display:inline-block"> <button class="btn green">Hesapla</button> <a class="btn yellow" href="/export-month?m={m}">CSV Rapor Al</a> <a class="btn cyan" href="/month/workers?m={m}">Çalışan Aylık Raporu</a> <a class="btn purple" href="/month/firms?m={m}">Firma Aylık Raporu</a></form></div><div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>İşçilik / Net Kalan</span><b>{money(sm['labor'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div><div class="card"><h2>Firma Bazlı Aylık Kâr Özeti</h2><p class='small'>Firma brüt kârı = Firmadan alınacak ücret − o firmaya ait çalışan hakedişleri. Genel masraflar bu tabloda düşülmez.</p><table><tr><th>FİRMA</th><th class='right'>TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞİ</th><th class='right'>ÇALIŞAN ÜCRETİ</th><th class='right'>SİZE KALAN BRÜT KÂR</th></tr>{firm_trs}</table></div><div class="card"><h2>Çalışan Bazlı Aylık Hesap Özeti</h2><table><tr><th>ÇALIŞAN</th><th class="right">TOPLAM HAKEDİŞ</th><th class="right">AVANS</th><th class="right">ÖDEME</th><th class="right">KALAN BAKİYE</th></tr>{worker_summary_trs}</table></div><div class="card"><h2>Çalışan Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class="right">ADET / PAKET</th><th class="right">PAKET İÇİ</th><th class="right">ÜRÜN ADEDİ</th><th class="right">BİRİM ÜCRET</th><th class="right">HAKEDİŞ</th></tr>{worker_trs}</table></div></div><div class="card"><h2>Firma Bazlı Gün Gün Aylık Döküm</h2><div class="table-wrap"><table><tr><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class="right">TESLİM ADET</th><th class="right">BİRİM FİYAT</th><th class="right">FİRMA HAKEDİŞİ</th></tr>{firm_daily_trs}</table></div></div>"""
+    body += worker_account_table(worker_summary)
     return page("Ay Sonu", body)
 
 
@@ -1298,6 +1327,7 @@ def worker_month_report(m: Optional[str] = None, worker_id: Optional[int] = None
     summary_trs = "".join([f"<tr><td>{escape(str(r['worker'] or ""))}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay çalışan hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['work_date'])}</td><td>{escape(str(r['worker'] or ""))}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or r['product'] or ''))}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{int(num(r['package_size'])) if int(num(r['package_size']))>1 else '-'}</td><td class='right'>{int(num(r['product_qty']))}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money(r['earned'])}</td></tr>" for r in detail]) or "<tr><td colspan='10' class='center small'>Bu ay iş kaydı yok.</td></tr>"
     body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-worker'>Çalışan seç</label><select id='report-worker' name='worker_id' style='max-width:280px;display:inline-block'>{worker_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-workers?m={m}&amp;worker_id={worker_id or 0}'>Çalışan Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Hakediş</span><b>{money(total_earned)}</b></div><div class='kpi'><span>Toplam Avans</span><b>{money(total_advance)}</b></div><div class='kpi'><span>Toplam Ödeme</span><b>{money(total_paid)}</b></div><div class='kpi'><span>Toplam Kalan</span><b>{money(total_balance)}</b></div></div><div class='card'><h2>Çalışan Aylık Hesap Toplamları</h2><table><tr><th>ÇALIŞAN</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>KALAN</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{money(total_earned)}</th><th class='right'>{money(total_advance)}</th><th class='right'>{money(total_paid)}</th><th class='right'>{money(total_balance)}</th></tr></table></div><div class='card'><h2>Gün Gün Yapılan İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class='right'>ADET/PAKET</th><th class='right'>PAKET İÇİ</th><th class='right'>ÜRÜN ADEDİ</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body += worker_account_table(summary)
     return page("Çalışan Aylık Raporu", body)
 
 
