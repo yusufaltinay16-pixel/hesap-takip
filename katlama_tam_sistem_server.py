@@ -638,6 +638,26 @@ def entries_table(data):
     return f"""<div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>ADET</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>NET KALAN</th><th>NOT</th><th>İŞLEM</th></tr>{trs}</table></div>"""
 
 
+def dashboard_firm_cards(m, accounts, summaries):
+    monthly = {r['firm_id']: r for r in summaries}
+    cards = []
+    for account in accounts:
+        r = monthly.get(account['id'], {})
+        metrics = [
+            ('Firma Teslim Adet', str(int(num(r.get('delivered_qty'))))),
+            ('Bu Ay Firma Hakedişi', money(account['earned'])),
+            ('Bu Ay İşçilik Hakedişi', money(r.get('labor'))),
+            ('Bu Ay Brüt Kâr', money(num(account['earned'])-num(r.get('labor')))),
+            ('Önceki Aydan Alacak Devri', money(account['opening'])),
+            ('Bu Ay Alınan Ödeme', money(account['collected'])),
+            ('Bu Ay Alınan Avans', money(account['advance'])),
+            ('Kalan Alacak / Sonraki Aya Devir', money(account['balance'])),
+        ]
+        boxes = ''.join(f"<div class='kpi'><span>{label}</span><b>{value}</b></div>" for label,value in metrics)
+        cards.append(f"<section class='card firm-summary'><h2>{escape(account['firm_name'])}</h2><p class='small'>{escape(m)} dönemi</p><div class='kpis'>{boxes}</div><p><a class='btn cyan' href='/month/firms?m={m}&amp;firm_id={account['id']}'>Firma Aylık Raporu</a></p></section>")
+    return ''.join(cards)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(m: Optional[str] = None):
     m = m or this_month()
@@ -650,6 +670,7 @@ def dashboard(m: Optional[str] = None):
     firm_collected = sum(num(r["collected"]) for r in firm_accounts)
     firm_advance = sum(num(r["advance"]) for r in firm_accounts)
     firm_balance = sum(num(r["balance"]) for r in firm_accounts)
+    firm_cards = dashboard_firm_cards(m, firm_accounts, firm_month_summary(m))
     compare = rows("""
     SELECT f.name firm_name,p.name product, COALESCE(fd.firm_qty,0) firm_qty,
            COALESCE(en.worker_qty,0) worker_qty,
@@ -686,8 +707,9 @@ def dashboard(m: Optional[str] = None):
     stage_trs = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or ""))}</td><td class='right'>{int(num(r['folded_qty']))}</td><td class='right'>{int(num(r['stage_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td><td class='{diff_class(r['diff'])}'>{'DOĞRU' if int(num(r['diff']))==0 else 'FAZLA' if num(r['diff'])>0 else 'EKSİK'}</td></tr>" for r in stage_compare]) or "<tr><td colspan='7' class='center small'>Kontrol edilecek işçilik kaydı yok.</td></tr>"
     body = f"""
     <div class="card"><form method="get" action="/dashboard"><label for="dashboard-month">Ay seç</label><input id="dashboard-month" type="month" name="m" value="{m}" required style="max-width:200px;display:inline-block"> <button class="btn green">Göster</button> <a class="btn cyan" href="/month?m={m}">Ay Sonu Raporları</a></form><p class="small">Tüm adetler, gelirler, giderler ve hareketler seçilen aya aittir. Önceki aylardan kalan bakiyeler devir olarak gösterilir.</p></div>
-    <div class="kpis"><div class="kpi"><span>Firma Teslim Adet</span><b>{int(num(sm['qty']))}</b></div><div class="kpi"><span>Firma Hak Ediş</span><b>{money(sm['revenue'])}</b></div><div class="kpi"><span>Bu Ay İşçilik Hakedişi</span><b>{money(sm['hakedis'])}</b></div><div class="kpi"><span>Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Net Kazanç</span><b>{money(sm['net'])}</b></div></div>
-    <div class="card"><h2>Firma Ödeme ve Alacak Durumu</h2><div class="kpis three"><div class="kpi"><span>Firmalardan Alınan Ödeme</span><b>{money(firm_collected)}</b></div><div class="kpi"><span>Firmalardan Alınan Avans</span><b>{money(firm_advance)}</b></div><a class="kpi" href="/month/firms?m={m}"><span>Kalan Alacak / Sonraki Aya Devir</span><b>{money(firm_balance)}</b><span>Firma bazlı aylık raporu aç</span></a></div><p class="small">Önceki aydan firma alacağı: {money(firm_opening)}. Kalan alacak = Devir + Bu ay hakediş − Bu ay tahsilat − Bu ay avans.</p></div>
+    {firm_cards}
+    <div class="card"><h2>Genel Aylık Sonuç</h2><div class="kpis three"><div class="kpi"><span>Genel Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Tüm Firmalar Brüt Kâr</span><b>{money(sm['gross'])}</b></div><div class="kpi"><span>Masraflar Sonrası Net Kazanç</span><b>{money(sm['net'])}</b></div></div><p class="small">Genel masraflar firmalara dağıtılmadan burada bir kez düşülür.</p></div>
+
     <div class="card"><h2>Çalışan Ödeme ve Borç Durumu</h2><div class="kpis"><div class="kpi"><span>Önceki Aydan Çalışan Borcu</span><b>{money(worker_opening)}</b></div><div class="kpi"><span>Bu Ay Hakediş</span><b>{money(sm['hakedis'])}</b></div><div class="kpi"><span>Bu Ay Ödeme</span><b>{money(sm['paid'])}</b></div><div class="kpi"><span>Bu Ay Avans</span><b>{money(sm['advance'])}</b></div><a class="kpi" href="/month/workers?m={m}"><span>Kalan Çalışan Borcu / Sonraki Aya Devir</span><b>{money(worker_balance)}</b></a></div><p class="small">Kalan borç = Önceki aydan devir + Bu ay hakediş − Bu ay ödeme − Bu ay avans.</p></div>
     {worker_account_table(worker_accounts)}
     {firm_account_table(firm_accounts)}
@@ -1182,7 +1204,7 @@ def delete_firm_receipt(rid: int):
 
 def firm_month_summary(m: str, firm_id: Optional[int] = None):
     return rows("""
-        SELECT f.name firm_name,
+        SELECT f.id firm_id,f.name firm_name,
                COALESCE(d.delivered_qty,0) delivered_qty,
                COALESCE(d.revenue,0) revenue,
                COALESCE(e.labor,0) labor,
