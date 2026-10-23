@@ -232,7 +232,29 @@ def init_db():
     # Mevcut tokenlar korunur; tokenı boş olan eski çalışanlara yukarıda otomatik kişiye özel link tokenı verilir.
 
     initialize_protection(c)
+    merge_tema_receipt_duplicate(c)
     con.commit(); c.close(); con.close()
+
+
+def merge_tema_receipt_duplicate(cur):
+    """Tahsilatları teslim firmasına bağla; mükerrer boş firmayı arşivle."""
+    cur.execute("SELECT value FROM app_settings WHERE key='tema_receipt_merge_v1'")
+    if cur.fetchone():
+        return
+    cur.execute("SELECT id,name FROM firms WHERE id IN (1,2) ORDER BY id FOR UPDATE")
+    firms = cur.fetchall()
+    if [(r['id'],r['name']) for r in firms] != [(1,'TEMA KONFEKSİYON'),(2,'tema konfeksiyon')]:
+        return
+    cur.execute("""SELECT EXISTS(SELECT 1 FROM products WHERE firm_id=2)
+        OR EXISTS(SELECT 1 FROM entries WHERE firm_id_snapshot=2)
+        OR EXISTS(SELECT 1 FROM deliveries WHERE firm_id_snapshot=2) occupied""")
+    if cur.fetchone()['occupied']:
+        return
+    backup_in_transaction(cur, 'Tema mükerrer firma tahsilatlarını birleştirme öncesi')
+    cur.execute("SELECT set_config('app.actor','Tema mükerrer firma düzeltmesi',true)")
+    cur.execute("UPDATE firm_receipts SET firm_id=1 WHERE firm_id=2")
+    cur.execute("UPDATE firms SET active=0 WHERE id=2")
+    cur.execute("INSERT INTO app_settings(key,value) VALUES('tema_receipt_merge_v1','1')")
 
 
 BUSINESS_TABLES = ('firms','workers','products','work_types','entries','deliveries','payments','advances','expenses','firm_receipts')
@@ -835,7 +857,13 @@ def save_product(firm_id: int = Form(...), name: str = Form(...), firm_price: fl
 def save_firm(name: str = Form(...)):
     name = " ".join(name.strip().split())
     if name:
-        exec_db("INSERT INTO firms(name,active,created_at) VALUES(%s,1,%s) ON CONFLICT(name) DO UPDATE SET active=1", (name, now_iso()))
+        key = name.casefold().replace('\u0307', '')
+        existing = next((f for f in rows("SELECT id,name FROM firms ORDER BY active DESC,id")
+                         if " ".join(f['name'].split()).casefold().replace('\u0307', '') == key), None)
+        if existing:
+            exec_db("UPDATE firms SET active=1 WHERE id=%s", (existing['id'],))
+        else:
+            exec_db("INSERT INTO firms(name,active,created_at) VALUES(%s,1,%s) ON CONFLICT(name) DO UPDATE SET active=1", (name, now_iso()))
     return RedirectResponse("/products", status_code=303)
 
 
@@ -1143,6 +1171,7 @@ def firm_account_summary(m: Optional[str] = None, firm_id: Optional[int] = None)
           FROM firm_receipts WHERE receipt_date<%s GROUP BY firm_id
         ) r ON r.firm_id=f.id
         WHERE (%s IS NULL OR f.id=%s)
+          AND (f.active=1 OR d.firm_id IS NOT NULL OR r.firm_id IS NOT NULL)
         ORDER BY f.name,f.id
     """, (start,start,end,start,start,start,end,firm_id,firm_id))
 
@@ -1362,7 +1391,7 @@ def firm_month_report(m: Optional[str] = None, firm_id: Optional[int] = None):
     summary = firm_month_summary(m, firm_id)
     detail = firm_month_detail(m, firm_id)
     firm_options = "<option value='0'>Tüm firmalar</option>"
-    for firm in rows("SELECT id,name FROM firms ORDER BY name,id"):
+    for firm in rows("SELECT id,name FROM firms WHERE active=1 ORDER BY name,id"):
         selected = " selected" if firm["id"] == firm_id else ""
         firm_options += f"<option value='{firm['id']}'{selected}>{escape(firm['name'])}</option>"
     accounts = firm_account_summary(m, firm_id)
