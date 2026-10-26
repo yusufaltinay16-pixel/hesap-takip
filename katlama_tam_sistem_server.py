@@ -319,6 +319,11 @@ def initialize_protection(cur):
     cur.execute('ALTER TABLE deliveries ALTER COLUMN firm_price SET NOT NULL')
     cur.execute('ALTER TABLE deliveries ALTER COLUMN firm_id_snapshot SET NOT NULL')
     cur.execute('ALTER TABLE entries ALTER COLUMN firm_id_snapshot SET NOT NULL')
+    # Authorized correction: October 2026 tulum work belongs to Tuzcuoglu.
+    cur.execute("""SELECT EXISTS(SELECT 1 FROM entries WHERE product_id=77 AND firm_id_snapshot=24 AND work_date>='2026-10-01' AND work_date<'2026-11-01' AND EXISTS(SELECT 1 FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.id=77 AND p.name='tulum ütü' AND f.id=99 AND lower(f.name)='tuzcuoğlu bebe'))
+        OR EXISTS(SELECT 1 FROM deliveries WHERE product_id=77 AND firm_id_snapshot=24 AND deliv_date>='2026-10-01' AND deliv_date<'2026-11-01' AND EXISTS(SELECT 1 FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.id=77 AND p.name='tulum ütü' AND f.id=99 AND lower(f.name)='tuzcuoğlu bebe')) needs_repair""")
+    if cur.fetchone()["needs_repair"]:
+        backup_in_transaction(cur, 'Ekim 2026 tulum ütü firma düzeltmesi öncesi')
     cur.execute("""CREATE OR REPLACE FUNCTION keep_record_prices() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF TG_TABLE_NAME='entries' THEN
@@ -343,8 +348,10 @@ def initialize_protection(cur):
         RETURN NEW;
       END $$;
       DROP TRIGGER IF EXISTS protect_entry_price ON entries;
+      UPDATE entries SET firm_id_snapshot=99 WHERE product_id=77 AND firm_id_snapshot=24 AND work_date>='2026-10-01' AND work_date<'2026-11-01' AND EXISTS(SELECT 1 FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.id=77 AND p.name='tulum ütü' AND f.id=99 AND lower(f.name)='tuzcuoğlu bebe');
       CREATE TRIGGER protect_entry_price BEFORE INSERT OR UPDATE ON entries FOR EACH ROW EXECUTE FUNCTION keep_record_prices();
       DROP TRIGGER IF EXISTS protect_delivery_price ON deliveries;
+      UPDATE deliveries SET firm_id_snapshot=99 WHERE product_id=77 AND firm_id_snapshot=24 AND deliv_date>='2026-10-01' AND deliv_date<'2026-11-01' AND EXISTS(SELECT 1 FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.id=77 AND p.name='tulum ütü' AND f.id=99 AND lower(f.name)='tuzcuoğlu bebe');
       CREATE TRIGGER protect_delivery_price BEFORE INSERT OR UPDATE ON deliveries FOR EACH ROW EXECUTE FUNCTION keep_record_prices();
       CREATE OR REPLACE FUNCTION remember_business_change() RETURNS trigger LANGUAGE plpgsql AS $$
       DECLARE b JSONB; a JSONB;
