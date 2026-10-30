@@ -750,17 +750,21 @@ def dashboard(m: Optional[str] = None):
 
 
 @app.get("/workers", response_class=HTMLResponse)
-def workers():
+def workers(m: Optional[str] = None):
+    try:
+        report_month = datetime.strptime(m or this_month(), "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        report_month = this_month()
     host = public_base_url()
-    data = rows("""
-    SELECT w.*, COALESCE(en.qty,0) qty, COALESCE(en.earned,0) earned, COALESCE(ad.amount,0) avans, COALESCE(pa.amount,0) odeme, COALESCE(en.earned,0)-COALESCE(ad.amount,0)-COALESCE(pa.amount,0) net
-    FROM workers w
-    LEFT JOIN (SELECT worker_id,SUM(qty) qty,SUM(qty*worker_price) earned FROM entries GROUP BY worker_id) en ON en.worker_id=w.id
-    LEFT JOIN (SELECT worker_id,SUM(amount) amount FROM advances GROUP BY worker_id) ad ON ad.worker_id=w.id
-    LEFT JOIN (SELECT worker_id,SUM(amount) amount FROM payments GROUP BY worker_id) pa ON pa.worker_id=w.id
-    WHERE w.active=1
-    ORDER BY w.name
-    """)
+    accounts = {r['worker_id']: r for r in worker_month_summary_rows(report_month)}
+    quantities = {r['worker_id']: r['qty'] for r in rows(
+        "SELECT worker_id,SUM(qty) qty FROM entries WHERE work_date LIKE %s GROUP BY worker_id", (report_month+'%',))}
+    data = []
+    for worker in rows("SELECT * FROM workers WHERE active=1 ORDER BY name"):
+        account = accounts.get(worker['id'], {})
+        data.append(dict(worker, qty=quantities.get(worker['id'],0),
+            earned=account.get('earned',0), avans=account.get('advance',0),
+            odeme=account.get('paid',0), opening=account.get('opening',0), net=account.get('balance',0)))
     trs = ""
     for w in data:
         legacy_token = None
@@ -769,14 +773,14 @@ def workers():
                 legacy_token = old_token
                 break
         kullanilan_token = legacy_token or w['token']
-        path = f"/w/{kullanilan_token}"
+        path = f"/w/{kullanilan_token}?m={report_month}"
         link = host + path
         mesaj = f"Merhaba {escape(str(w['name'] or ""))} ……\n\nKatlama adet giriş linkin:\n{link}\n\nLinke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."
         wa = f"https://wa.me/?text={quote(mesaj)}"
-        trs += f"<tr><td>{w['id']}</td><td>{escape(str(w['name'] or ""))}</td><td>{escape(str(w.get('phone') or ''))}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td class='link-cell'><a class='copy' href='{link}' target='_blank' title='{link}'>{link}</a></td><td><div class='actions'><a class='btn cyan' href='{link}' target='_blank'>Aç</a><a class='btn green' href='{wa}' target='_blank'>WhatsApp</a><form method='post' action='/refresh-worker-token/{w['id']}'><button class='btn yellow'>Yeni Link</button></form><form class='inline' method='post' action='/delete-worker/{w['id']}'><button class='btn red' type='submit'>Sil</button></form></div></td></tr>"
+        trs += f"<tr><td>{w['id']}</td><td>{escape(str(w['name'] or ""))}</td><td>{escape(str(w.get('phone') or ''))}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['opening'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td class='link-cell'><a class='copy' href='{link}' target='_blank' title='{link}'>{link}</a></td><td><div class='actions'><a class='btn cyan' href='{link}' target='_blank'>Aç</a><a class='btn green' href='{wa}' target='_blank'>WhatsApp</a><form method='post' action='/refresh-worker-token/{w['id']}'><button class='btn yellow'>Yeni Link</button></form><form class='inline' method='post' action='/delete-worker/{w['id']}'><button class='btn red' type='submit'>Sil</button></form></div></td></tr>"
     body = f"""
     <div class="card"><h2>Çalışan Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Çalışan Kaydet</button></form></div>
-    <div class="card"><h2>Çalışan Linkleri</h2><div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="10" class="center small">Çalışan yok.</td></tr>'}</table></div></div>
+    <div class="card"><h2>Çalışan Linkleri — {report_month}</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>BU AY HAKEDİŞ</th><th class='right'>ÖNCEKİ AYDAN DEVİR</th><th class='right'>BU AY AVANS</th><th class='right'>BU AY ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="11" class="center small">Çalışan yok.</td></tr>'}</table></div></div>
     """
     return page("Çalışan Linkleri", body)
 
@@ -990,15 +994,15 @@ def get_worker_by_token(token: str):
     # Her link token üzerinden ilgili kişiyi açar.
     return one("SELECT * FROM workers WHERE token=%s AND active=1", (token,))
 
-def worker_balance(worker_id: int):
-    """Hakediş, ödeme ve avansı tek veritabanı görünümünden, birer kez toplar."""
-    return one("""
-        SELECT
-          (SELECT COALESCE(SUM(qty*worker_price),0) FROM entries WHERE worker_id=%s) earned,
-          (SELECT COALESCE(SUM(qty*worker_price),0) FROM entries WHERE worker_id=%s AND work_date=%s) today_earned,
-          (SELECT COALESCE(SUM(amount),0) FROM payments WHERE worker_id=%s) paid,
-          (SELECT COALESCE(SUM(amount),0) FROM advances WHERE worker_id=%s) advance
-    """, (worker_id, worker_id, today(), worker_id, worker_id))
+def worker_balance(worker_id: int, m: Optional[str] = None):
+    report_month = m or this_month()
+    accounts = worker_month_summary_rows(report_month, worker_id)
+    account = accounts[0] if accounts else {}
+    today_total = one("SELECT COALESCE(SUM(qty*worker_price),0) earned FROM entries WHERE worker_id=%s AND work_date=%s AND work_date LIKE %s",
+        (worker_id,today(),report_month+'%'))
+    return dict(earned=account.get('earned',0), paid=account.get('paid',0),
+        advance=account.get('advance',0), opening=account.get('opening',0),
+        balance=account.get('balance',0), today_earned=today_total['earned'])
 
 
 @app.get("/w/{token}", response_class=HTMLResponse)
@@ -1013,7 +1017,7 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
                         FROM work_types wt JOIN products p ON p.id=wt.product_id JOIN firms f ON f.id=p.firm_id
                         WHERE wt.active=1 AND p.active=1 ORDER BY f.name,p.name,wt.name""")
     product_opts = "".join([f"<option value='{w['id']}' data-basis='{w['pay_basis']}'>{escape(str(w['firm_name'] or ""))} — {escape(str(w['product_name'] or ""))} — {escape(str(w['name'] or ""))} ({money(w['worker_price'])} / {'paket' if w['pay_basis']=='package' else 'adet'})</option>" for w in work_types])
-    total = worker_balance(worker["id"])
+    total = worker_balance(worker["id"], report_month)
     paid_total = num(total["paid"])
     adv_total = num(total["advance"])
     msg = "<div class='notice'>Adet kaydedildi.</div>" if saved else (f"<div class='bad'>{escape(str(error or ""))}</div>" if error else "")
@@ -1048,8 +1052,8 @@ def worker_page(token: str, saved: Optional[str] = None, error: Optional[str] = 
         record_cards += f"""<div class='record-card'><div class='record-head'><b>{escape(str(r['product'] or ""))}</b><div class='record-date'>{display_date(r['work_date'])}</div></div><div class='record-values'><div class='record-value'><span>{first_label}</span><b>{int(num(r['qty']))}</b></div><div class='record-value'><span>Paket Türü</span><b>{package_value}</b></div><div class='record-value'><span>Toplam Ürün</span><b>{int(num(r['piece_qty']))}</b></div><div class='record-value'><span>Hakediş</span><b>{money(r['earned'])}</b></div></div>{f"<div class='record-note'>Not: {escape(str(r['note'] or ""))}</div>" if r['note'] else ''}<div class='record-actions'><a class='btn yellow' href='/w/{token}/edit/{r['id']}'>Güncelle</a><form method='post' action='/w/{token}/delete/{r['id']}'><button class='btn red' type='submit'>Sil</button></form></div></div>"""
     if not record_cards:
         record_cards = "<div class='center small'>Henüz kayıt yok.</div>"
-    kalan = num(total["earned"] if total else 0) - paid_total - adv_total
-    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{escape(worker['name'])}</div><div class="worker-sub">Yaptığın işi seç, adetini gir; yanlışsa güncelle veya sil.</div><div class="kpis"><div class="kpi"><span>Bugünkü Kazancım</span><b>{money(total["today_earned"])}</b></div><div class="kpi"><span>Genel Hak Edişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Toplam Ödeme</span><b>{money(paid_total)}</b></div><div class="kpi"><span>Toplam Avans</span><b>{money(adv_total)}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card"><h2>Aylık İş Adetlerim</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class="kpis">{monthly_cards}</div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="1">Paket sayısı esas (iç adet belirtilmedi)</option><option value="2">2'li</option><option value="3">3'lü</option><option value="4">4'lü</option><option value="6">6'lı</option><option value="7">7'li</option><option value="10">10'lu</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Günlük İş Adetlerim</h2><div class="record-list">{daily_cards}</div></div><div class="card"><details><summary>Kayıtlarımı Güncelle / Sil</summary><div class='record-list'>{record_cards}</div></details></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
+    kalan = num(total["balance"])
+    body = f"""{msg}<div class="worker-hero"><div class="worker-title">{escape(worker['name'])}</div><div class="worker-sub">{report_month} dönemi — Net kalan = Önceki aydan devir + Bu ayki hakediş − Bu ayki ödeme − Bu ayki avans.</div><div class="kpis"><div class="kpi"><span>Bugünkü Kazancım</span><b>{money(total["today_earned"])}</b></div><div class="kpi"><span>Bu Ayki Hakedişim</span><b>{money(total['earned'] if total else 0)}</b></div><div class="kpi"><span>Bu Ayki Ödeme</span><b>{money(paid_total)}</b></div><div class="kpi"><span>Bu Ayki Avans</span><b>{money(adv_total)}</b></div><div class="kpi"><span>Önceki Aydan Devir</span><b>{money(total["opening"])}</b></div><div class="kpi"><span>Net Kalan</span><b>{money(kalan)}</b></div></div></div><div class="card"><h2>Aylık İş Adetlerim</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class="kpis">{monthly_cards}</div></div><div class="card worker-form"><h2>Yapılan İşi Gir</h2><form method="post" action="/w/{token}/add"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="work_date" type="date" value="{today()}" required></div><div><label>Yapılan İş</label><select id="work_type_id" name="work_type_id" required onchange="paketAlani()">{product_opts}</select></div><div><label id="qty_label">Yapılan Adet / Paket Sayısı</label><input name="qty" type="number" min="1" required autofocus></div><div id="package_box"><label>Pakette Kaç Ürün Var?</label><select name="package_size"><option value="1">Paket sayısı esas (iç adet belirtilmedi)</option><option value="2">2'li</option><option value="3">3'lü</option><option value="4">4'lü</option><option value="6">6'lı</option><option value="7">7'li</option><option value="10">10'lu</option></select></div><div><label>Not</label><input name="note" placeholder="İsteğe bağlı"></div></div><br><button class="btn green" type="submit">ADETİ KAYDET</button></form></div><div class="card"><h2>Günlük İş Adetlerim</h2><div class="record-list">{daily_cards}</div></div><div class="card"><details><summary>Kayıtlarımı Güncelle / Sil</summary><div class='record-list'>{record_cards}</div></details></div><script>function paketAlani(){{var s=document.getElementById('work_type_id');var b=s.options[s.selectedIndex]?.dataset.basis==='package';document.getElementById('package_box').style.display=b?'block':'none';document.getElementById('qty_label').textContent=b?'Yapılan Paket Sayısı':'Yapılan Ürün Adedi';}}paketAlani();</script>"""
     return page(worker["name"], body, nav=False)
 
 
@@ -1416,7 +1420,7 @@ def worker_month_report(m: Optional[str] = None, worker_id: Optional[int] = None
     total_balance = sum(num(r["balance"]) for r in summary)
     summary_trs = "".join([f"<tr><td>{escape(str(r['worker'] or ""))}</td><td class='right'>{money(r['earned'])}</td><td class='right'>{money(r['advance'])}</td><td class='right'>{money(r['paid'])}</td><td class='right'>{money(r['balance'])}</td></tr>" for r in summary]) or "<tr><td colspan='5' class='center small'>Bu ay çalışan hesabı yok.</td></tr>"
     detail_trs = "".join([f"<tr><td>{display_date(r['work_date'])}</td><td>{escape(str(r['worker'] or ""))}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or r['product'] or ''))}</td><td class='right'>{int(num(r['qty']))}</td><td class='right'>{int(num(r['package_size'])) if int(num(r['package_size']))>1 else '-'}</td><td class='right'>{int(num(r['product_qty']))}</td><td class='right'>{money(r['worker_price'])}</td><td class='right'>{money(r['earned'])}</td></tr>" for r in detail]) or "<tr><td colspan='10' class='center small'>Bu ay iş kaydı yok.</td></tr>"
-    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-worker'>Çalışan seç</label><select id='report-worker' name='worker_id' style='max-width:280px;display:inline-block'>{worker_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-workers?m={m}&amp;worker_id={worker_id or 0}'>Çalışan Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Hakediş</span><b>{money(total_earned)}</b></div><div class='kpi'><span>Toplam Avans</span><b>{money(total_advance)}</b></div><div class='kpi'><span>Toplam Ödeme</span><b>{money(total_paid)}</b></div><div class='kpi'><span>Toplam Kalan</span><b>{money(total_balance)}</b></div></div><div class='card'><h2>Çalışan Aylık Hesap Toplamları</h2><table><tr><th>ÇALIŞAN</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>KALAN</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{money(total_earned)}</th><th class='right'>{money(total_advance)}</th><th class='right'>{money(total_paid)}</th><th class='right'>{money(total_balance)}</th></tr></table></div><div class='card'><h2>Gün Gün Yapılan İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class='right'>ADET/PAKET</th><th class='right'>PAKET İÇİ</th><th class='right'>ÜRÜN ADEDİ</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
+    body = f"""<div class='card'><form method='get'><label>Ay seç: YYYY-AA</label><input name='m' value='{m}' style='max-width:180px;display:inline-block'> <label for='report-worker'>Çalışan seç</label><select id='report-worker' name='worker_id' style='max-width:280px;display:inline-block'>{worker_options}</select> <button class='btn green'>Göster</button> <a class='btn yellow' href='/export-workers?m={m}&amp;worker_id={worker_id or 0}'>Çalışan Raporunu İndir</a> <a class='btn gray' href='/month?m={m}'>Ay Sonuna Dön</a></form></div><div class='kpis'><div class='kpi'><span>Toplam Hakediş</span><b>{money(total_earned)}</b></div><div class='kpi'><span>Bu Ayki Avans</span><b>{money(total_advance)}</b></div><div class='kpi'><span>Bu Ayki Ödeme</span><b>{money(total_paid)}</b></div><div class='kpi'><span>Toplam Kalan</span><b>{money(total_balance)}</b></div></div><div class='card'><h2>Çalışan Aylık Hesap Toplamları</h2><table><tr><th>ÇALIŞAN</th><th class='right'>HAKEDİŞ</th><th class='right'>AVANS</th><th class='right'>ÖDEME</th><th class='right'>KALAN</th></tr>{summary_trs}<tr><th>GENEL TOPLAM</th><th class='right'>{money(total_earned)}</th><th class='right'>{money(total_advance)}</th><th class='right'>{money(total_paid)}</th><th class='right'>{money(total_balance)}</th></tr></table></div><div class='card'><h2>Gün Gün Yapılan İşler</h2><div class='table-wrap'><table><tr><th>TARİH</th><th>ÇALIŞAN</th><th>FİRMA</th><th>ÜRÜN</th><th>YAPILAN İŞ</th><th class='right'>ADET/PAKET</th><th class='right'>PAKET İÇİ</th><th class='right'>ÜRÜN ADEDİ</th><th class='right'>BİRİM TL</th><th class='right'>TOPLAM TL</th></tr>{detail_trs}</table></div></div>"""
     body += worker_account_table(summary)
     return page("Çalışan Aylık Raporu", body)
 
@@ -1504,6 +1508,7 @@ if __name__ == "__main__":
     init_db()
     print("="*70); print("KATLAMA ATÖLYESİ PROFESYONEL SİSTEM BAŞLADI"); print(f"Yönetim paneli: http://127.0.0.1:{PORT}/dashboard"); print(f"Aynı Wi-Fi telefon: http://{local_ip()}:{PORT}"); print("="*70)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
 
 
 
