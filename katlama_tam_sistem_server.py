@@ -932,12 +932,23 @@ def restore_product(pid: int):
     return RedirectResponse("/products", status_code=303)
 
 
+def delivery_whatsapp_link(record):
+    """Prepare a draft; the user chooses the recipient and sends in WhatsApp."""
+    message = (
+        f"{record['firm_name']}\n"
+        f"Teslim tarihi: {display_date(record['deliv_date'])}\n"
+        f"İş: {record['product']}\n"
+        f"Teslim edilen: {int(num(record['firm_qty'])):,} adet"
+    ).replace(",", ".")
+    return "https://wa.me/?text=" + quote(message, safe="")
+
+
 @app.get("/deliveries", response_class=HTMLResponse)
 def deliveries():
     products = rows("""SELECT p.id,p.name,f.name firm_name FROM products p JOIN firms f ON f.id=p.firm_id WHERE p.active=1 ORDER BY f.name,p.name""")
     opts = "".join([f"<option value='{p['id']}'>{escape(str(p['firm_name'] or ""))} — {escape(str(p['name'] or ""))}</option>" for p in products])
     data = rows("""SELECT d.id,d.deliv_date,f.name firm_name,p.name product,d.firm_qty,d.firm_qty*d.firm_price amount,COALESCE(d.note,'') note FROM deliveries d JOIN products p ON p.id=d.product_id JOIN firms f ON f.id=d.firm_id_snapshot ORDER BY d.deliv_date DESC,d.id DESC LIMIT 500""")
-    trs = "".join([f"<tr><td>{r['id']}</td><td>{display_date(r['deliv_date'])}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{money(r['amount'])}</td><td>{escape(str(r['note'] or ""))}</td><td><a class='btn yellow' href='/edit-delivery/{r['id']}'>Güncelle</a> <form method='post' action='/delete-delivery/{r['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in data]) or "<tr><td colspan='8' class='center small'>Teslim kaydı yok.</td></tr>"
+    trs = "".join([f"<tr><td>{r['id']}</td><td>{display_date(r['deliv_date'])}</td><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td class='right'>{int(num(r['firm_qty']))}</td><td class='right'>{money(r['amount'])}</td><td>{escape(str(r['note'] or ""))}</td><td><a class='btn green' href='{escape(delivery_whatsapp_link(r), quote=True)}' target='_blank' rel='noopener noreferrer'>WhatsApp’tan Gönder</a> <a class='btn yellow' href='/edit-delivery/{r['id']}'>Güncelle</a> <form method='post' action='/delete-delivery/{r['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in data]) or "<tr><td colspan='8' class='center small'>Teslim kaydı yok.</td></tr>"
     body = f"""<div class="card"><h2>Firma Teslim Gir</h2><form method="post" action="/add-delivery"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="deliv_date" type="date" value="{today()}" required></div><div><label>Firma / Ürün</label><select name="product_id">{opts}</select></div><div><label>Firma Teslim Adet</label><input name="firm_qty" type="number" min="1" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Teslim Kaydet</button></form></div><div class="card"><table><tr><th>ID</th><th>TARİH</th><th>FİRMA</th><th>ÜRÜN</th><th class='right'>FİRMA TESLİM ADET</th><th class='right'>FİRMA HAKEDİŞ</th><th>NOT</th><th>İŞLEM</th></tr>{trs}</table></div>"""
     return page("Firma Teslim", body)
 
