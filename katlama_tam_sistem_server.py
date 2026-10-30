@@ -935,10 +935,8 @@ def restore_product(pid: int):
 def delivery_whatsapp_link(record):
     """Prepare a draft; the user chooses the recipient and sends in WhatsApp."""
     message = (
-        f"{record['firm_name']}\n"
-        f"Teslim tarihi: {display_date(record['deliv_date'])}\n"
-        f"İş: {record['product']}\n"
-        f"Teslim edilen: {int(num(record['firm_qty'])):,} adet"
+        f"Tarih: {display_date(record['deliv_date'])}\n"
+        f"Teslim edilen adet = {int(num(record['firm_qty'])):,}"
     ).replace(",", ".")
     return "https://wa.me/?text=" + quote(message, safe="")
 
