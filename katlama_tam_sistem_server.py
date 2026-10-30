@@ -777,10 +777,32 @@ def workers(m: Optional[str] = None):
         link = host + path
         mesaj = f"Merhaba {escape(str(w['name'] or ""))} ……\n\nKatlama adet giriş linkin:\n{link}\n\nLinke tıkla, açılmazsa kopyalayıp Chrome'a yapıştır."
         wa = f"https://wa.me/?text={quote(mesaj)}"
-        trs += f"<tr><td>{w['id']}</td><td>{escape(str(w['name'] or ""))}</td><td>{escape(str(w.get('phone') or ''))}</td><td class='right'>{int(num(w['qty']))}</td><td class='right'>{money(w['earned'])}</td><td class='right'>{money(w['opening'])}</td><td class='right'>{money(w['avans'])}</td><td class='right'>{money(w['odeme'])}</td><td class='right'>{money(w['net'])}</td><td class='link-cell'><a class='copy' href='{link}' target='_blank' title='{link}'>{link}</a></td><td><div class='actions'><a class='btn cyan' href='{link}' target='_blank'>Aç</a><a class='btn green' href='{wa}' target='_blank'>WhatsApp</a><form method='post' action='/refresh-worker-token/{w['id']}'><button class='btn yellow'>Yeni Link</button></form><form class='inline' method='post' action='/delete-worker/{w['id']}'><button class='btn red' type='submit'>Sil</button></form></div></td></tr>"
+        values = (("Bu Ay Adet", str(int(num(w['qty'])))), ("Bu Ay Hakediş", money(w['earned'])),
+                  ("Önceki Aydan Devir", money(w['opening'])), ("Bu Ay Avans", money(w['avans'])),
+                  ("Bu Ay Ödeme", money(w['odeme'])), ("Net Kalan", money(w['net'])))
+        figures = "".join(f"<div><dt>{label}</dt><dd>{value}</dd></div>" for label,value in values)
+        trs += f"""<article class='worker-directory-card'>
+        <h3>{escape(str(w['name'] or ''))}</h3><p class='small'>No: {w['id']} · Telefon: {escape(str(w.get('phone') or '—'))}</p>
+        <dl class='worker-directory-values'>{figures}</dl>
+        <div class='worker-directory-actions'><a class='btn cyan' href='{link}' target='_blank' rel='noopener'>Aç</a>
+        <a class='btn green' href='{wa}' target='_blank' rel='noopener'>WhatsApp</a>
+        <form method='post' action='/refresh-worker-token/{w['id']}'><button class='btn yellow'>Yeni Link</button></form>
+        <form method='post' action='/delete-worker/{w['id']}'><button class='btn red' type='submit'>Sil</button></form></div></article>"""
     body = f"""
-    <div class="card"><h2>Çalışan Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Çalışan Kaydet</button></form></div>
-    <div class="card"><h2>Çalışan Linkleri — {report_month}</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class='table-wrap'><table class='workers-table'><tr><th>ID</th><th>ÇALIŞAN</th><th>TELEFON</th><th class='right'>ADET</th><th class='right'>BU AY HAKEDİŞ</th><th class='right'>ÖNCEKİ AYDAN DEVİR</th><th class='right'>BU AY AVANS</th><th class='right'>BU AY ÖDEME</th><th class='right'>NET KALAN</th><th>LİNK</th><th>İŞLEM</th></tr>{trs or '<tr><td colspan="11" class="center small">Çalışan yok.</td></tr>'}</table></div></div>
+  <style>
+    .worker-directory{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px}}
+    .worker-directory-card{{min-width:0;background:#0f172a;border:1px solid var(--line);border-radius:14px;padding:18px}}
+    .worker-directory-card h3{{margin:0 0 8px;font-size:21px;overflow-wrap:anywhere}}
+    .worker-directory-values{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 10px;margin:20px 0}}
+    .worker-directory-values dt{{color:var(--muted);font-size:12px;margin-bottom:6px}}
+    .worker-directory-values dd{{margin:0;font-size:17px;font-weight:800;overflow-wrap:anywhere}}
+    .worker-directory-actions{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+    .worker-directory-actions form{{margin:0;display:inline-block}}
+    .worker-directory-actions .btn{{white-space:nowrap;padding:11px 13px}}
+    @media(max-width:850px){{.worker-directory{{grid-template-columns:1fr}}}}
+    @media(max-width:400px){{.worker-directory-values{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
+    </style>  <div class="card"><h2>Çalışan Ekle</h2><form method="post" action="/add-worker"><div class="grid"><div><label>Çalışan Adı</label><input name="name" required></div><div><label>Telefon</label><input name="phone" placeholder="05..."></div></div><br><button class="btn green">Çalışan Kaydet</button></form></div>
+    <div class="card"><h2>Çalışan Linkleri — {report_month}</h2><form method="get"><label>Ay seç</label><input type="month" name="m" value="{report_month}" required><button class="btn cyan">Göster</button></form><div class='worker-directory'>{trs or "<p>Çalışan yok.</p>"}</div></div>
     """
     return page("Çalışan Linkleri", body)
 
