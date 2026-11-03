@@ -727,6 +727,30 @@ def dashboard_firm_cards(m, accounts, summaries):
     return ''.join(cards)
 
 
+def dashboard_today_work():
+    work_day = today()
+    totals = rows("""
+        SELECT COALESCE(wt.name, p.name) AS work_name,
+               CASE WHEN wt.pay_basis='package' OR e.package_size>1 THEN 'paket' ELSE 'adet' END AS unit,
+               SUM(e.qty) AS qty
+        FROM entries e
+        JOIN products p ON p.id=e.product_id
+        LEFT JOIN work_types wt ON wt.id=e.work_type_id
+        WHERE e.work_date=%s
+        GROUP BY 1,2
+        ORDER BY 1,2
+    """, (work_day,))
+    cards = ''.join(
+        f"<div class='kpi'><span>{escape(r['work_name'])}</span>"
+        f"<b>{format(int(num(r['qty'])), ',').replace(',', '.')} {r['unit']}</b></div>"
+        for r in totals
+    )
+    content = f"<div class='kpis'>{cards}</div>" if cards else "<p class='small'>Bugün henüz iş kaydı yok.</p>"
+    return (f"<section class='card'><h2>Bugün Yapılan İşler — {display_date(work_day)}</h2>"
+            "<p class='small'>Tüm çalışanların bugünkü toplamı. Aşağıdaki ay seçiminden bağımsızdır.</p>"
+            f"{content}</section>")
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(m: Optional[str] = None):
     m = m or this_month()
@@ -775,6 +799,7 @@ def dashboard(m: Optional[str] = None):
     """, (m+'%', m+'%'))
     stage_trs = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or ""))}</td><td class='right'>{int(num(r['folded_qty']))}</td><td class='right'>{int(num(r['stage_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td><td class='{diff_class(r['diff'])}'>{'DOĞRU' if int(num(r['diff']))==0 else 'FAZLA' if num(r['diff'])>0 else 'EKSİK'}</td></tr>" for r in stage_compare]) or "<tr><td colspan='7' class='center small'>Kontrol edilecek işçilik kaydı yok.</td></tr>"
     body = f"""
+    {dashboard_today_work()}
     <div class="card"><form method="get" action="/dashboard"><label for="dashboard-month">Ay seç</label><input id="dashboard-month" type="month" name="m" value="{m}" required style="max-width:200px;display:inline-block"> <button class="btn green">Göster</button> <a class="btn cyan" href="/month?m={m}">Ay Sonu Raporları</a></form><p class="small">Tüm adetler, gelirler, giderler ve hareketler seçilen aya aittir. Önceki aylardan kalan bakiyeler devir olarak gösterilir.</p></div>
     {firm_cards}
     <div class="card"><h2>Genel Aylık Sonuç</h2><div class="kpis three"><div class="kpi"><span>Genel Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Tüm Firmalar Brüt Kâr</span><b>{money(sm['gross'])}</b></div><div class="kpi"><span>Masraflar Sonrası Net Kazanç</span><b>{money(sm['net'])}</b></div></div><p class="small">Genel masraflar firmalara dağıtılmadan burada bir kez düşülür.</p></div>
