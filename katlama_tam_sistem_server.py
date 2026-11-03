@@ -563,14 +563,54 @@ table th.right,table td.right{text-align:center;font-variant-numeric:tabular-num
 """
 
 
+
+MONEY_VISIBILITY = r"""<style>
+.money-visibility{margin-left:auto}
+html.hide-money input:is([name="firm_price"],[name="worker_price"],[name="amount"]){visibility:hidden}
+</style>
+<script>
+(function(){
+  const key = 'katlama-hide-money';
+  const button = document.querySelector('.money-visibility');
+  if (!button) return;
+  const entries = [];
+  const amount = /[−-]?\d[\d.,]*\s*(?:₺|TL\b)/g;
+  const walker = document.createTreeWalker(document.querySelector('.wrap'), NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement.closest('script,style,textarea,.money-visibility')) continue;
+    const original = node.nodeValue;
+    const masked = original.replace(amount, '•••');
+    if (original !== masked) entries.push([node, original, masked]);
+  }
+  let hidden = false;
+  try { hidden = localStorage.getItem(key) === '1'; } catch (_) {}
+  function update(){
+    document.documentElement.classList.toggle('hide-money', hidden);
+    for (const [node, original, masked] of entries) node.nodeValue = hidden ? masked : original;
+    button.textContent = hidden ? 'TL Tutarlarını Göster' : 'TL Tutarlarını Gizle';
+    button.setAttribute('aria-pressed', String(hidden));
+  }
+  button.addEventListener('click', function(){
+    hidden = !hidden;
+    try { localStorage.setItem(key, hidden ? '1' : '0'); } catch (_) {}
+    update();
+  });
+  update();
+})();
+</script>"""
+
+
 def page(title, body, nav=True):
+    money_button = '<button type="button" class="btn gray money-visibility">TL Tutarlarını Gizle</button>' if title != "Yönetici Girişi" else ""
+    money_script = MONEY_VISIBILITY if money_button else ""
     nav_html = ""
     if nav:
         nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/firm-receipts">Firma Tahsilat / Avans</a><a href="/month">Ay Sonu</a><a href="/security">Güvenlik / Yedek / Geçmiş</a><form method="post" action="/logout"><button class="btn gray">Çıkış</button></form></div>"""
     body = nav_html + body
     nav_html = ""
     body = re.sub(r"(<form\b[^>]*\bmethod\s*=\s*['\"]?post['\"]?[^>]*>)", lambda match: match.group(1)+"<input type='hidden' name='csrf' value='"+escape(CSRF.get())+"'>", body, flags=re.I)
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(title)}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{escape(title)}</h1>{nav_html}</div>{body}</div><script>window.addEventListener("pageshow",function(e){{if(e.persisted)location.reload();}});</script></body></html>"""
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(title)}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{escape(title)}</h1>{money_button}{nav_html}</div>{body}</div>{money_script}<script>window.addEventListener("pageshow",function(e){{if(e.persisted)location.reload();}});</script></body></html>"""
 
 
 @app.on_event("startup")
