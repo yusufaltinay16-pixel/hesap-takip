@@ -653,7 +653,15 @@ def page(title, body, nav=True):
     nav_html = ""
     if nav:
         nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/firm-receipts">Firma Tahsilat / Avans</a><a href="/month">Ay Sonu</a><a href="/security">Güvenlik / Yedek / Geçmiş</a><form method="post" action="/logout"><button class="btn gray">Çıkış</button></form></div>"""
-    body = nav_html + body
+    if title == "Katlama Atölyesi Ana Panel":
+        daily_section = re.search(r"<section\\b[^>]*id='daily-work-totals'[\\s\\S]*?</section>", body)
+        if daily_section:
+            daily_html = daily_section.group(0)
+            body = daily_html + nav_html + body[:daily_section.start()] + body[daily_section.end():]
+        else:
+            body = nav_html + body
+    else:
+        body = nav_html + body
     nav_html = ""
     body = re.sub(r"(<form\b[^>]*\bmethod\s*=\s*['\"]?post['\"]?[^>]*>)", lambda match: match.group(1)+"<input type='hidden' name='csrf' value='"+escape(CSRF.get())+"'>", body, flags=re.I)
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(title)}</title>{CSS}</head><body><div class="wrap"><div class="top"><h1>{escape(title)}</h1>{money_button}{nav_html}</div>{body}</div>{money_script}<script>window.addEventListener("pageshow",function(e){{if(e.persisted)location.reload();}});</script></body></html>"""
