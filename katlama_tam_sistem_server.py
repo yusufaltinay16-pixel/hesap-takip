@@ -608,6 +608,12 @@ html.hide-money input[name="firm_price"],html.hide-money.firm-amount-page input[
   for (const box of document.querySelectorAll('.firm-summary .kpi')) {
     if (!box.textContent.includes('İşçilik')) collect(box);
   }
+  if (title === 'Katlama Atölyesi Ana Panel') {
+    for (const box of document.querySelectorAll('.kpi')) {
+      const label = box.querySelector('span');
+      if (label && ['Tüm Firmalar Brüt Kâr','Masraflar Sonrası Net Kazanç'].includes(label.textContent.trim())) collect(box);
+    }
+  }
   if (title === 'Firma Aylık Raporu') {
     for (const box of document.querySelectorAll('.kpi')) {
       if (!box.textContent.includes('Çalışan Ücretleri')) collect(box);
