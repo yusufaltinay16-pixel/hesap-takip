@@ -654,7 +654,7 @@ def page(title, body, nav=True):
     if nav:
         nav_html = """<div class="nav"><a href="/dashboard">Ana Panel</a><a class="delivery-link" href="/deliveries">Firmaya Gönderilen Adet</a><a href="/workers">Çalışan Linkleri</a><a href="/products">Firma / Ürün / Fiyat</a><a href="/expenses">Masraflar</a><a href="/payments">Ödemeler</a><a href="/firm-receipts">Firma Tahsilat / Avans</a><a href="/month">Ay Sonu</a><a href="/security">Güvenlik / Yedek / Geçmiş</a><form method="post" action="/logout"><button class="btn gray">Çıkış</button></form></div>"""
     if title == "Katlama Atölyesi Ana Panel":
-        daily_section = re.search(r"<section\\b[^>]*id='daily-work-totals'[\\s\\S]*?</section>", body)
+        daily_section = re.search(r"<section[^>]*id='daily-work-totals'.*?</section>", body, flags=re.S)
         if daily_section:
             daily_html = daily_section.group(0)
             body = daily_html + nav_html + body[:daily_section.start()] + body[daily_section.end():]
