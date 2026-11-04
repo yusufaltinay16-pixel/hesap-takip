@@ -773,8 +773,8 @@ def dashboard_firm_cards(m, accounts, summaries):
     return ''.join(cards)
 
 
-def dashboard_today_work():
-    work_day = today()
+def dashboard_today_work(work_day=None, report_month=None):
+    work_day = work_day or today()
     totals = rows("""
         SELECT COALESCE(wt.name, p.name) AS work_name,
                CASE WHEN wt.pay_basis='package' OR e.package_size>1 THEN 'paket' ELSE 'adet' END AS unit,
@@ -791,15 +791,24 @@ def dashboard_today_work():
         f"<b>{format(int(num(r['qty'])), ',').replace(',', '.')} {r['unit']}</b></div>"
         for r in totals
     )
-    content = f"<div class='kpis'>{cards}</div>" if cards else "<p class='small'>Bugün henüz iş kaydı yok.</p>"
-    return (f"<section class='card'><h2>Bugün Yapılan İşler — {display_date(work_day)}</h2>"
-            "<p class='small'>Tüm çalışanların bugünkü toplamı. Aşağıdaki ay seçiminden bağımsızdır.</p>"
+    content = f"<div class='kpis'>{cards}</div>" if cards else "<div class='kpi'><span>Seçilen günde kayıt yok</span><b>0 adet</b><p>Başka bir tarih seçerek günlük toplamları görebilirsiniz.</p></div>"
+    return (f"<section class='card' id='daily-work-totals' style='border:2px solid #22d3ee'>"
+            f"<h2>Günlük Yapılan Toplam Adetler — {display_date(work_day)}</h2>"
+            "<p>Tüm çalışanların yaptığı işler burada iş türüne göre toplanır.</p>"
+            "<form method='get' action='/dashboard' style='margin-bottom:18px'>"
+            f"<input type='hidden' name='m' value='{escape(report_month or this_month())}'>"
+            f"<label for='daily-work-date'>Gün seç</label><input id='daily-work-date' type='date' name='day' value='{work_day}' required style='max-width:200px;display:inline-block'> "
+            "<button class='btn cyan' type='submit'>Günlük Toplamları Göster</button></form>"
             f"{content}</section>")
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(m: Optional[str] = None):
+def dashboard(m: Optional[str] = None, day: Optional[str] = None):
     m = m or this_month()
+    try:
+        work_day = datetime.strptime(day or today(), "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        work_day = today()
     sm = month_summary(m)
     worker_accounts = worker_month_summary_rows(m)
     worker_opening = sum(num(r['opening']) for r in worker_accounts)
@@ -845,7 +854,7 @@ def dashboard(m: Optional[str] = None):
     """, (m+'%', m+'%'))
     stage_trs = "".join([f"<tr><td>{escape(str(r['firm_name'] or ""))}</td><td>{escape(str(r['product'] or ""))}</td><td>{escape(str(r['work_type'] or ""))}</td><td class='right'>{int(num(r['folded_qty']))}</td><td class='right'>{int(num(r['stage_qty']))}</td><td class='right {diff_class(r['diff'])}'>{int(num(r['diff']))}</td><td class='{diff_class(r['diff'])}'>{'DOĞRU' if int(num(r['diff']))==0 else 'FAZLA' if num(r['diff'])>0 else 'EKSİK'}</td></tr>" for r in stage_compare]) or "<tr><td colspan='7' class='center small'>Kontrol edilecek işçilik kaydı yok.</td></tr>"
     body = f"""
-    {dashboard_today_work()}
+    {dashboard_today_work(work_day, m)}
     <div class="card"><form method="get" action="/dashboard"><label for="dashboard-month">Ay seç</label><input id="dashboard-month" type="month" name="m" value="{m}" required style="max-width:200px;display:inline-block"> <button class="btn green">Göster</button> <a class="btn cyan" href="/month?m={m}">Ay Sonu Raporları</a></form><p class="small">Tüm adetler, gelirler, giderler ve hareketler seçilen aya aittir. Önceki aylardan kalan bakiyeler devir olarak gösterilir.</p></div>
     {firm_cards}
     <div class="card"><h2>Genel Aylık Sonuç</h2><div class="kpis three"><div class="kpi"><span>Genel Masraflar</span><b>{money(sm['expense'])}</b></div><div class="kpi"><span>Tüm Firmalar Brüt Kâr</span><b>{money(sm['gross'])}</b></div><div class="kpi"><span>Masraflar Sonrası Net Kazanç</span><b>{money(sm['net'])}</b></div></div><p class="small">Genel masraflar firmalara dağıtılmadan burada bir kez düşülür.</p></div>
