@@ -566,19 +566,59 @@ table th.right,table td.right{text-align:center;font-variant-numeric:tabular-num
 
 MONEY_VISIBILITY = r"""<style>
 .money-visibility{margin-left:auto}
-html.hide-money input:is([name="firm_price"],[name="worker_price"],[name="amount"]){visibility:hidden}
+html.hide-money input[name="firm_price"],html.hide-money.firm-amount-page input[name="amount"]{visibility:hidden}
 </style>
 <script>
 (function(){
-  const key = 'katlama-hide-money';
+  const key = 'katlama-hide-firm-money';
+  const title = document.title;
+  const firmOnly = ['Firma Teslim','Firma Teslim Güncelle','Firma Tahsilat ve Avansları'].includes(title);
+  document.documentElement.classList.toggle('firm-amount-page', firmOnly);
   const button = document.querySelector('.money-visibility');
   if (!button) return;
   const entries = [];
   const amount = /[−-]?\d[\d.,]*\s*(?:₺|TL\b)/g;
-  const walker = document.createTreeWalker(document.querySelector('.wrap'), NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (node.parentElement.closest('script,style,textarea,.money-visibility')) continue;
+  const targets = new Set();
+  function collect(root){
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node.parentElement.closest('script,style,textarea,.money-visibility')) targets.add(node);
+    }
+  }
+  if (firmOnly) collect(document.querySelector('.wrap'));
+  for (const table of document.querySelectorAll('table')) {
+    const header = table.rows[0];
+    if (!header) continue;
+    const labels = Array.from(header.cells, c => c.textContent.trim().toLocaleUpperCase('tr-TR'));
+    const firmAccount = table.classList.contains('firm-money-table') ||
+      (labels[0] === 'FİRMA' && labels.includes('KALAN ALACAK / SONRAKİ AYA DEVİR')) ||
+      (labels.includes('FİRMA') && labels.includes('TUTAR'));
+    for (let col=0; col<labels.length; col++) {
+      const label = labels[col];
+      const firmColumn = firmAccount || label.includes('FİRMA HAKEDİŞ') ||
+        label.includes('FİRMA HAK EDİŞ') || label.includes('FİRMADAN ALINAN') ||
+        label.includes('BRÜT KÂR') || label.includes('SİZE KALAN') ||
+        (title === 'Firma Aylık Raporu' && ['BİRİM TL','TOPLAM TL'].includes(label));
+      if (firmColumn) for (const row of Array.from(table.rows).slice(1)) {
+        if (row.cells[col]) collect(row.cells[col]);
+      }
+    }
+  }
+  for (const box of document.querySelectorAll('.firm-summary .kpi')) {
+    if (!box.textContent.includes('İşçilik')) collect(box);
+  }
+  if (title === 'Firma Aylık Raporu') {
+    for (const box of document.querySelectorAll('.kpi')) {
+      if (!box.textContent.includes('Çalışan Ücretleri')) collect(box);
+    }
+  }
+  if (title === 'Firma / Ürün / Fiyat') {
+    for (const option of document.querySelectorAll('option')) {
+      if (option.textContent.includes('Firma fiyatı')) collect(option);
+    }
+  }
+  for (const node of targets) {
     const original = node.nodeValue;
     const masked = original.replace(amount, '•••');
     if (original !== masked) entries.push([node, original, masked]);
@@ -588,7 +628,7 @@ html.hide-money input:is([name="firm_price"],[name="worker_price"],[name="amount
   function update(){
     document.documentElement.classList.toggle('hide-money', hidden);
     for (const [node, original, masked] of entries) node.nodeValue = hidden ? masked : original;
-    button.textContent = hidden ? 'TL Tutarlarını Göster' : 'TL Tutarlarını Gizle';
+    button.textContent = hidden ? 'Firma Tutarlarını Göster' : 'Firma Tutarlarını Gizle';
     button.setAttribute('aria-pressed', String(hidden));
   }
   button.addEventListener('click', function(){
@@ -602,7 +642,7 @@ html.hide-money input:is([name="firm_price"],[name="worker_price"],[name="amount
 
 
 def page(title, body, nav=True):
-    money_button = '<button type="button" class="btn gray money-visibility">TL Tutarlarını Gizle</button>' if title != "Yönetici Girişi" else ""
+    money_button = '<button type="button" class="btn gray money-visibility">Firma Tutarlarını Gizle</button>' if title in ("Katlama Atölyesi Ana Panel", "Firma / Ürün / Fiyat", "Firma Teslim", "Firma Teslim Güncelle", "Firma Tahsilat ve Avansları", "Firma Aylık Raporu", "Ay Sonu") else ""
     money_script = MONEY_VISIBILITY if money_button else ""
     nav_html = ""
     if nav:
