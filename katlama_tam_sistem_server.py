@@ -794,6 +794,9 @@ def dashboard_today_work(work_day=None, report_month=None):
         GROUP BY 1,2
         ORDER BY 1,2
     """, (work_day,))
+    delivery_total = one("SELECT COALESCE(SUM(firm_qty),0) AS qty FROM deliveries WHERE deliv_date=%s", (work_day,))
+    delivery_qty = format(int(num(delivery_total['qty'])), ',').replace(',', '.')
+    delivery_card = f"<div class='kpi'><span>Firma Teslim Adedi</span><b>{delivery_qty} adet</b></div>"
     cards = ''.join(
         f"<div class='kpi'><span>{escape(r['work_name'])}</span>"
         f"<b>{format(int(num(r['qty'])), ',').replace(',', '.')} {r['unit']}</b></div>"
@@ -807,7 +810,7 @@ def dashboard_today_work(work_day=None, report_month=None):
             f"<input type='hidden' name='m' value='{escape(report_month or this_month())}'>"
             f"<label for='daily-work-date'>Gün seç</label><input id='daily-work-date' type='date' name='day' value='{work_day}' required style='max-width:200px;display:inline-block'> "
             "<button class='btn cyan' type='submit'>Günlük Toplamları Göster</button></form>"
-            f"{content}</section>")
+            f"{delivery_card}{content}</section>")
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
