@@ -1299,7 +1299,7 @@ def delete_expense(eid: int):
 
 
 @app.get("/payments", response_class=HTMLResponse)
-def payments():
+def payments(m: Optional[str] = None, bulk_checked: bool = False):
     workers = rows("SELECT id,name FROM workers WHERE active=1 ORDER BY name")
     opts = "".join([f"<option value='{w['id']}'>{escape(str(w['name'] or ""))}</option>" for w in workers])
     data = rows("""SELECT p.id,p.pay_date,w.name worker,p.amount,COALESCE(p.note,'') note FROM payments p JOIN workers w ON w.id=p.worker_id ORDER BY p.pay_date DESC,p.id DESC LIMIT 500""")
@@ -1307,7 +1307,79 @@ def payments():
     advdata = rows("""SELECT a.id,a.adv_date,w.name worker,a.amount,COALESCE(a.note,'') note FROM advances a JOIN workers w ON w.id=a.worker_id ORDER BY a.adv_date DESC,a.id DESC LIMIT 500""")
     advtrs = "".join([f"<tr><td>{r['id']}</td><td>{display_date(r['adv_date'])}</td><td>{escape(str(r['worker'] or ""))}</td><td class='right'>{money(r['amount'])}</td><td>{escape(str(r['note'] or ""))}</td><td><form method='post' action='/delete-advance/{r['id']}' style='display:inline'><button class='btn red' type='submit'>Sil</button></form></td></tr>" for r in advdata]) or "<tr><td colspan='6' class='center small'>Avans yok.</td></tr>"
     body = f"""<div class="card"><h2>Çalışan Ödemesi</h2><form method="post" action="/add-payment"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="pay_date" type="date" value="{today()}" required></div><div><label>Çalışan</label><select name="worker_id">{opts}</select></div><div><label>Ödeme Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn green">Ödeme Kaydet</button></form></div><div class="card"><h2>Çalışan Avansı</h2><form method="post" action="/add-advance"><div class="grid"><div><label>Tarih (Gün/Ay/Yıl)</label><input name="adv_date" type="date" value="{today()}" required></div><div><label>Çalışan</label><select name="worker_id">{opts}</select></div><div><label>Avans Tutarı</label><input name="amount" type="number" step="0.01" min="0" required></div><div style="grid-column:span 2"><label>Not</label><input name="note"></div></div><br><button class="btn yellow">Avans Kaydet</button></form></div><div class="card"><h2>Ödemeler</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>ÖDEME</th><th>NOT</th><th>İŞLEM</th></tr>{trs}</table></div><div class="card"><h2>Avanslar</h2><table><tr><th>ID</th><th>TARİH</th><th>ÇALIŞAN</th><th class='right'>AVANS</th><th>NOT</th><th>İŞLEM</th></tr>{advtrs}</table></div><div class="card"><h2>Çalışan Genel Özeti</h2>{entries_table(last_entries(500))}</div>"""
+    report_month = m or this_month()
+    month_form = f"""<div class="card"><h2>Toplu Çalışan Ödemesi</h2>
+    <form method="get" action="/payments"><label for="bulk-month">Ödeme ayı</label>
+    <input id="bulk-month" type="month" name="m" value="{report_month}" max="{this_month()}" required style="max-width:200px">
+    <button class="btn cyan">Kalan Tutarları Göster</button></form>"""
+    bulk = month_form
+    if bulk_checked:
+        bulk += "<p role='status'>Toplu işlem tamamlandı. Yalnızca tutarı değişmemiş, ödenecek bakiyesi olan seçili çalışanlara kayıt eklendi. Kayıtları aşağıdaki Ödemeler tablosundan kontrol edebilirsin.</p>"
+    if m and m <= this_month():
+        active = {w['id'] for w in workers}
+        choices = []
+        for r in worker_month_summary_rows(m):
+            amount = round(num(r['balance']), 2)
+            if r['worker_id'] in active and amount > 0:
+                choices.append(f"""<label style="display:block"><input type="checkbox" name="selected" value="{r['worker_id']}:{amount:.2f}" style="width:auto"> {escape(r['worker'])} — {money(amount)}</label>""")
+        if choices:
+            pay_date = bulk_payment_date(m)
+            bulk += f"""<p>Seçilen ayın kalan bakiyesi, önceki aylardan devreden tutar dahil. Kayıt tarihi: {display_date(pay_date)}.</p>
+            <form method="post" action="/add-bulk-payment"><input type="hidden" name="m" value="{m}">
+            {''.join(choices)}<button class="btn green">İşaretlilerin Ödemesini Kaydet</button></form>"""
+        else:
+            bulk += "<p>Bu ay ödenecek bakiyesi olan aktif çalışan yok.</p>"
+    body = bulk + "</div>" + body
     return page("Ödemeler", body)
+
+
+def bulk_payment_date(m):
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", m):
+        raise HTTPException(status_code=400, detail="Geçerli bir ödeme ayı seçin.")
+    start = normalize_date(m + "-01")
+    today_date = today()
+    if start[:7] > today_date[:7]:
+        raise HTTPException(status_code=400, detail="Gelecek aya toplu ödeme kaydedilemez.")
+    if start[:7] == today_date[:7]:
+        return today_date
+    year, month_number = map(int, m.split("-"))
+    next_month = date(year + (month_number == 12), month_number % 12 + 1, 1)
+    return date.fromordinal(next_month.toordinal() - 1).isoformat()
+
+
+@app.post("/add-bulk-payment")
+def add_bulk_payment(m: str = Form(...), selected: list[str] = Form(default=[])):
+    pay_date = bulk_payment_date(m)
+    if not selected:
+        return RedirectResponse(f"/payments?m={m}", status_code=303)
+    expected = {}
+    for value in selected:
+        if not re.fullmatch(r"[1-9][0-9]{0,9}:[0-9]{1,14}[.][0-9]{2}", value):
+            raise HTTPException(status_code=400, detail="Çalışan seçimini yenileyin.")
+        worker_id, amount = value.split(":")
+        if int(worker_id) > 2147483647:
+            raise HTTPException(status_code=400, detail="Geçersiz çalışan.")
+        expected[int(worker_id)] = amount
+    year, month_number = map(int, m.split("-"))
+    cutoff = date(year + (month_number == 12), month_number % 12 + 1, 1).isoformat()
+    # exec_db serializes writes; this statement rechecks the displayed balances under its lock.
+    exec_db("""
+        INSERT INTO payments(pay_date,worker_id,amount,note,created_at)
+        SELECT %s,w.id,s.amount,%s,%s
+        FROM unnest(%s::integer[], %s::numeric[]) AS s(id,amount)
+        JOIN workers w ON w.id=s.id AND w.active=1
+        CROSS JOIN LATERAL (
+            SELECT ROUND(COALESCE(SUM(t.amount),0)::numeric,2) AS balance
+            FROM (
+                SELECT qty*worker_price AS amount FROM entries WHERE worker_id=w.id AND work_date<%s
+                UNION ALL SELECT -amount FROM advances WHERE worker_id=w.id AND adv_date<%s
+                UNION ALL SELECT -amount FROM payments WHERE worker_id=w.id AND pay_date<%s
+            ) t
+        ) b
+        WHERE b.balance=s.amount AND s.amount>0
+    """, (pay_date, "Toplu çalışan ödemesi — " + m, now_iso(), list(expected), list(expected.values()),
+          cutoff, cutoff, cutoff))
+    return RedirectResponse(f"/payments?m={m}&bulk_checked=1", status_code=303)
 
 
 @app.post("/add-payment")
