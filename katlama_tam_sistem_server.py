@@ -1680,9 +1680,9 @@ def export_workers(m: Optional[str] = None, worker_id: Optional[int] = None):
     summary = worker_month_summary_rows(m, worker_id); detail = worker_month_detail(m, worker_id)
     with ReportWorkbook(out) as wr:
         wr.writerow(["ÇALIŞAN AYLIK HESAP TOPLAMLARI",m])
-        wr.writerow(["ÇALIŞAN","HAKEDİŞ","AVANS","ÖDEME","KALAN"])
-        for r in summary: wr.writerow([r['worker'],report_money(num(r['earned'])),report_money(num(r['advance'])),report_money(num(r['paid'])),report_money(num(r['balance']))])
-        wr.writerow(["GENEL TOPLAM",report_money(sum(num(r['earned']) for r in summary)),report_money(sum(num(r['advance']) for r in summary)),report_money(sum(num(r['paid']) for r in summary)),report_money(sum(num(r['balance']) for r in summary))])
+        wr.writerow(["ÇALIŞAN","ÖNCEKİ AYDAN DEVİR","HAKEDİŞ","AVANS","ÖDEME","KALAN"])
+        for r in summary: wr.writerow([r['worker'],report_money(r['opening']),report_money(num(r['earned'])),report_money(num(r['advance'])),report_money(num(r['paid'])),report_money(num(r['balance']))])
+        wr.writerow(["GENEL TOPLAM",report_money(sum(num(r['opening']) for r in summary)),report_money(sum(num(r['earned']) for r in summary)),report_money(sum(num(r['advance']) for r in summary)),report_money(sum(num(r['paid']) for r in summary)),report_money(sum(num(r['balance']) for r in summary))])
         wr.writerow([]); wr.writerow(["GÜN GÜN YAPILAN İŞLER"])
         wr.writerow(["TARİH","ÇALIŞAN","FİRMA","ÜRÜN","YAPILAN İŞ","ADET/PAKET","PAKET İÇİ","ÜRÜN ADEDİ","BİRİM TL","TOPLAM TL"])
         for r in detail: wr.writerow([display_date(r['work_date']),r['worker'],r['firm_name'],r['product'],r['work_type'] or r['product'],int(num(r['qty'])),int(num(r['package_size'])) if int(num(r['package_size']))>1 else "",int(num(r['product_qty'])),report_money(num(r['worker_price'])),report_money(num(r['earned']))])
